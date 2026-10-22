@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>배달권역 지도 - 카카오맵</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<style>
+  :root{
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-border: #262b35;
+    --text: #e7e9ee;
+    --text-dim: #9aa1ad;
+    --accent: #ffcc33;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; font-family: -apple-system, "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", sans-serif; background: var(--bg); color: var(--text); }
+
+  .app { display:flex; height:100vh; position:relative; }
+
+  /* ---------- 사이드바 토글 버튼 ---------- */
+  .sidebar-toggle-btn {
+    position:absolute;
+    top:14px; left:14px;
+    width:40px; height:40px;
+    background: rgba(23,26,33,0.92);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 8px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    z-index: 50;
+    font-size: 18px;
+    backdrop-filter: blur(4px);
+    transition: left .25s ease;
+  }
+  .sidebar-toggle-btn:active { transform: scale(0.95); }
+
+  .sidebar-backdrop {
+    display:none;
+    position:fixed; inset:0;
+    background: rgba(0,0,0,0.5);
+    z-index: 35;
+  }
+
+  /* ---------- 사이드바 ---------- */
+  .sidebar {
+    width: 320px;
+    min-width: 320px;
+    background: var(--panel);
+    border-right: 1px solid var(--panel-border);
+    display:flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width .25s ease, min-width .25s ease, transform .25s ease;
+  }
+  .app.sidebar-hidden .sidebar {
+    width: 0;
+    min-width: 0;
+    border-right: none;
+  }
+  .sidebar-header {
+    padding: 18px 18px 12px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .sidebar-header h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: -0.2px; }
+  .sidebar-header p { margin: 0; font-size: 12px; color: var(--text-dim); }
+
+  .section { padding: 14px 18px; border-bottom: 1px solid var(--panel-border); flex-shrink:0; }
+  .section h2 {
+    font-size: 12px; color: var(--text-dim); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px;
+  }
+
+  .toggle-row { display:flex; align-items:center; justify-content: space-between; padding: 6px 0; }
+  .toggle-row .label { font-size: 13px; }
+  .toggle-row .desc { font-size: 11px; color: var(--text-dim); margin-top:2px; }
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity:0; width:0; height:0; }
+  .slider { position:absolute; cursor:pointer; inset:0; background: #2c3140; transition: .2s; border-radius: 999px; }
+  .slider:before { content:""; position:absolute; width:16px; height:16px; left:3px; top:3px; background: #fff; transition:.2s; border-radius:50%; }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(18px); }
+
+  .range-row { padding: 4px 0 2px; }
+  .range-row label { font-size:12px; color: var(--text-dim); display:flex; justify-content:space-between; margin-bottom:6px;}
+  input[type="range"] { width:100%; accent-color: var(--accent); }
+
+  select, input[type="text"] {
+    width:100%;
+    background:#1e2230;
+    border:1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    outline:none;
+  }
+  select:focus, input[type="text"]:focus { border-color: var(--accent); }
+  .field { margin-bottom: 10px; }
+  .field:last-child { margin-bottom:0; }
+
+  /* ---------- 대행사 복수선택 드롭다운 ---------- */
+  .multi-select { position: relative; }
+  .multi-select-btn {
+    width:100%;
+    display:flex; align-items:center; justify-content:space-between;
+    background:#1e2230;
+    border:1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor:pointer;
+    text-align:left;
+  }
+  .multi-select-btn:hover { border-color: #3a4055; }
+  .multi-select.open .multi-select-btn { border-color: var(--accent); }
+  .multi-select-arrow { font-size: 10px; color: var(--text-dim); flex-shrink:0; margin-left:8px; }
+  .multi-select-panel {
+    display:none;
+    position:absolute;
+    top: calc(100% + 4px);
+    left:0; right:0;
+    background:#1e2230;
+    border:1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 6px;
+    max-height: 220px;
+    overflow-y:auto;
+    z-index: 25;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .multi-select.open .multi-select-panel { display:block; }
+  .multi-select-option {
+    display:flex; align-items:center; gap:8px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    cursor:pointer;
+    font-size: 13px;
+  }
+  .multi-select-option:hover { background:#262b3d; }
+  .multi-select-option input[type="checkbox"] { accent-color: var(--accent); flex-shrink:0; }
+  .multi-select-option .opt-count { margin-left:auto; font-size:11px; color:var(--text-dim); }
+  .multi-select-divider { height:1px; background:var(--panel-border); margin: 4px 2px; }
+
+  .zone-list-wrap { flex:1; overflow-y:auto; padding: 10px 12px 18px; }
+  .zone-list { list-style:none; margin:0; padding:0; }
+  .zone-item {
+    display:flex; align-items:center; gap:10px;
+    padding: 8px 8px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    transition: background .15s;
+  }
+  .zone-item:hover { background: #1e2230; }
+  .zone-item.active { background: #232840; }
+  .zone-swatch { width: 11px; height:11px; border-radius: 3px; flex-shrink:0; border: 1px solid rgba(255,255,255,0.25); }
+  .zone-item .zone-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .zone-item .zone-city { font-size:11px; color:var(--text-dim); flex-shrink:0; }
+  .zone-item .zone-type-mini {
+    font-size: 9.5px; font-weight:700; padding: 2px 5px; border-radius: 4px; flex-shrink:0;
+  }
+  .zone-item .zone-type-mini.hybrid { background: rgba(105,219,124,0.18); color:#69db7c; }
+  .zone-item .zone-type-mini.only3pl { background: rgba(255,204,51,0.18); color: var(--accent); }
+  .zone-dong-btn {
+    flex-shrink:0;
+    font-size: 10.5px;
+    background: #2c3140;
+    color: var(--text-dim);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 3px 7px;
+    cursor: pointer;
+  }
+  .zone-dong-btn:hover { background:#353b4d; color:var(--text); }
+
+  .list-empty { font-size:12px; color:var(--text-dim); text-align:center; padding: 24px 10px; }
+  .list-count { font-size:11px; color:var(--text-dim); padding: 0 4px 8px; }
+
+  .legend-note { font-size: 11px; color: var(--text-dim); line-height:1.55; padding: 4px 2px 0; }
+  .legend-note b { color: var(--text); }
+
+  /* ---------- 지도 영역 ---------- */
+  .map-wrap { position: relative; flex:1; }
+  #map { width:100%; height:100%; }
+
+  .map-badge {
+    position:absolute; top:14px; left:64px;
+    background: rgba(23,26,33,0.9); border: 1px solid var(--panel-border);
+    color: var(--text); font-size: 12px; padding: 7px 12px; border-radius: 8px;
+    z-index: 5; backdrop-filter: blur(4px);
+  }
+
+  .info-window { font-family: inherit; font-size: 12.5px; padding: 2px 2px; color: #222; }
+  .info-window b { font-size: 13.5px; }
+  .iw-badge {
+    display:inline-block; font-size: 10.5px; font-weight:700;
+    padding: 2px 7px; border-radius: 999px; margin: 4px 4px 0 0;
+  }
+  .iw-hybrid { background:#e6f9ea; color:#2f9e44; }
+  .iw-only3pl { background:#fff6db; color:#e8a300; }
+  .iw-multi { background:#e7f1ff; color:#1c7ed6; }
+  .iw-detail-btn {
+    margin-top: 8px; width:100%;
+    background:#1a1a1a; color:#fff; border:none;
+    font-size: 11.5px; font-weight:600; padding: 6px; border-radius: 6px; cursor:pointer;
+  }
+
+  .admdong-label {
+    font-size: 11.5px;
+    color: #fff;
+    background: rgba(0, 20, 30, 0.75);
+    border: 1px solid #00e5ff;
+    padding: 2px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: auto;
+    cursor: pointer;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  }
+  .admdong-label.selected {
+    background: #ff5252;
+    border-color: #ff5252;
+  }
+
+  #loading-overlay, #api-key-warning {
+    position:absolute; inset:0; background: rgba(15,17,21,0.96); z-index: 20;
+    display:flex; align-items:center; justify-content:center; text-align:center; padding: 40px;
+  }
+  #loading-overlay .box, #api-key-warning .box { max-width: 480px; }
+  #api-key-warning h2, #loading-overlay h2 { margin-top:0; font-size: 18px; }
+  #api-key-warning p, #loading-overlay p { color: var(--text-dim); font-size: 13px; line-height:1.6; }
+  #api-key-warning code { background: #1e2230; padding: 2px 6px; border-radius: 4px; color: var(--accent); }
+
+  /* ---------- 상단 주소/장소 검색바 ---------- */
+  .top-search-wrap {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 420px;
+    z-index: 20;
+  }
+  .top-search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(23,26,33,0.95);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 6px 8px 6px 14px;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  .top-search-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 13.5px;
+    padding: 6px 0;
+  }
+  .top-search-box input::placeholder { color: var(--text-dim); }
+  .top-search-box button {
+    background: var(--accent);
+    border: none;
+    color: #1a1a1a;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .top-search-box button:active { transform: scale(0.97); }
+  .top-search-box button.secondary-btn {
+    background: #2c3140;
+    color: var(--text);
+    padding: 7px 10px;
+    font-size: 15px;
+  }
+
+  .search-results-dropdown {
+    margin-top: 6px;
+    background: rgba(23,26,33,0.97);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    overflow: hidden;
+    max-height: 260px;
+    overflow-y: auto;
+    display: none;
+  }
+  .search-results-dropdown.show { display: block; }
+  .search-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 13px;
+  }
+  .search-result-item:last-child { border-bottom: none; }
+  .search-result-item:hover { background: #1e2230; }
+  .search-result-item .r-name { font-weight: 600; margin-bottom: 2px; }
+  .search-result-item .r-addr { font-size: 11.5px; color: var(--text-dim); }
+
+  .zone-result-toast {
+    margin-top: 6px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    background: rgba(23,26,33,0.97);
+    border: 1px solid var(--panel-border);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .zone-result-toast.show { display: flex; }
+  .zone-result-row { display:flex; align-items:center; gap:8px; }
+  .zone-result-toast .swatch { width: 12px; height:12px; border-radius:3px; flex-shrink:0; }
+
+  @media (max-width: 768px) {
+    .top-search-wrap { max-width: none; width: calc(100% - 24px); top: 60px; }
+  }
+
+  /* ---------- 로그인 게이트 ---------- */
+  #loginGate {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    z-index: 1000;
+    display:flex; align-items:center; justify-content:center;
+    padding: 24px;
+  }
+  .login-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 36px 32px;
+    max-width: 380px;
+    width: 100%;
+    text-align: center;
+  }
+  .login-card h1 { font-size: 18px; margin: 0 0 8px; }
+  .login-card p { font-size: 13px; color: var(--text-dim); margin: 0 0 24px; line-height:1.5; }
+  #googleSignInDiv { display:flex; justify-content:center; }
+  .login-error {
+    margin-top: 16px;
+    font-size: 12.5px;
+    color: var(--danger);
+    display:none;
+  }
+  .login-error.show { display:block; }
+
+  /* ---------- 변경사항 알림 팝업 ---------- */
+  #changelogModal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 900;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #changelogModal.show { display: flex; }
+  .changelog-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 24px 26px;
+    max-width: 420px;
+    width: 100%;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .changelog-card h2 { font-size: 16px; margin: 0 0 4px; }
+  .changelog-card .cl-date { font-size: 11.5px; color: var(--text-dim); margin-bottom: 16px; }
+  .changelog-section { margin-bottom: 14px; }
+  .changelog-section:last-child { margin-bottom: 0; }
+  .changelog-section .cl-label {
+    font-size: 12px; font-weight: 600; margin-bottom: 6px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .cl-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .cl-dot.added { background:#69db7c; }
+  .cl-dot.removed { background:#ff6b6b; }
+  .cl-dot.modified { background:#ffd43b; }
+  .changelog-section ul { margin:0; padding-left: 18px; font-size: 12.5px; color: var(--text-dim); line-height:1.7; }
+  .changelog-close-btn {
+    margin-top: 18px; width: 100%;
+    background: var(--accent); border: none; color:#1a1a1a;
+    font-weight:600; font-size: 13px; padding: 10px; border-radius: 8px; cursor:pointer;
+  }
+
+  /* ---------- 범용 모달 (권역별 행정동 / 데이터 품질 검사) ---------- */
+  .generic-modal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 900;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .generic-modal.show { display: flex; }
+  .generic-modal .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 24px 26px;
+    max-width: 440px;
+    width: 100%;
+    max-height: 75vh;
+    overflow-y: auto;
+  }
+  .generic-modal .card h2 { font-size: 16px; margin: 0 0 4px; }
+  .generic-modal .card .subtitle { font-size: 11.5px; color: var(--text-dim); margin-bottom: 16px; }
+  .generic-modal .dong-chip-list { display:flex; flex-wrap:wrap; gap:6px; }
+  .generic-modal .dong-chip {
+    font-size: 12px;
+    background: #1e2230;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 5px 9px;
+  }
+  .generic-modal .dong-chip-partial {
+    opacity: 0.55;
+    border-style: dashed;
+  }
+  .generic-modal .close-btn {
+    margin-top: 18px; width: 100%;
+    background: var(--accent); border: none; color:#1a1a1a;
+    font-weight:600; font-size: 13px; padding: 10px; border-radius: 8px; cursor:pointer;
+  }
+  .generic-modal .loading-text { font-size: 13px; color: var(--text-dim); text-align:center; padding: 20px 0; }
+
+  .zone-meta-block {
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .zone-meta-row { display:flex; gap:6px; margin-bottom: 12px; }
+  .zone-badge {
+    font-size: 11.5px; font-weight:600; padding: 4px 10px; border-radius: 999px;
+  }
+  .zone-badge-hybrid { background: rgba(105,219,124,0.18); color:#69db7c; }
+  .zone-badge-only3pl { background: rgba(255,204,51,0.18); color: var(--accent); }
+  .zone-badge-multi { background: rgba(77,171,247,0.18); color:#4dabf7; }
+  .zone-meta-label { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  .agent-chip-list { display:flex; flex-wrap:wrap; gap:6px; }
+  .agent-chip {
+    font-size: 12px;
+    background: #232840;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 5px 9px;
+  }
+
+  /* ---------- 모바일 대응 ---------- */
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      height: 100%;
+      width: 82vw;
+      max-width: 320px;
+      min-width: 0;
+      z-index: 40;
+      box-shadow: 2px 0 16px rgba(0,0,0,0.5);
+      transform: translateX(0);
+    }
+    .app.sidebar-hidden .sidebar {
+      width: 82vw;
+      max-width: 320px;
+      transform: translateX(-100%);
+    }
+    .app:not(.sidebar-hidden) .sidebar-backdrop {
+      display: block;
+    }
+    .sidebar-toggle-btn { top: 12px; left: 12px; width: 38px; height: 38px; }
+    .map-badge { top:12px; left: 60px; font-size: 11px; padding: 6px 10px; }
+    .sidebar-header { padding: 16px 16px 10px; }
+    .section { padding: 12px 16px; }
+    .zone-item { font-size: 13px; }
+  }
+
+  /* [반경 필터] 좌표 기준 반경 필터 UI */
+  .radius-km { display:flex; align-items:center; gap:6px; flex:1; min-width:0; font-size:12px; color: var(--text-dim); }
+  .radius-km input[type="number"] {
+    width:72px; background:#1e2230; border:1px solid var(--panel-border); color: var(--text);
+    font-size:13px; padding:7px 8px; border-radius:8px; outline:none;
+  }
+  .radius-km input[type="number"]:focus { border-color: var(--accent); }
+  .radius-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  .radius-btn {
+    background: var(--accent); border:none; color:#1a1a1a; font-weight:600; font-size:12.5px;
+    padding:7px 12px; border-radius:7px; cursor:pointer; flex-shrink:0;
+  }
+  .radius-btn.secondary { background:#2c3140; color: var(--text); }
+  .radius-btn:active { transform: scale(0.97); }
+  .radius-status { font-size:11.5px; color: var(--text-dim); margin-top:6px; line-height:1.5; }
+  .radius-status.error { color:#ff6b6b; }
+  .radius-status b { color: var(--text); }
+
+  /* [매장 검색] vendor_id 검색 UI */
+  .radius-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .vendor-row { display:flex; gap:6px; }
+  .vendor-row input[type="text"] { flex:1; min-width:0; }
+  .vendor-result { margin-top: 8px; }
+  .vendor-name { font-size: 13px; font-weight: 600; line-height: 1.4; word-break: break-all; }
+  .vendor-id { font-weight: 400; color: var(--text-dim); font-size: 12px; }
+  .vendor-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; line-height: 1.5; word-break: break-all; }
+  .vendor-msg { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+  .vendor-msg.error { color: #ff6b6b; }
+</style>
+</head>
+<body>
+
+<div id="loginGate">
+  <div class="login-card">
+    <h1>배달권역 지도</h1>
+    <p>회사 구글 계정(@wesang.com)으로 로그인해야<br>지도를 볼 수 있어요.</p>
+    <div id="googleSignInDiv"></div>
+    <div class="login-error" id="loginError">wesang.com 계정으로만 로그인할 수 있습니다.</div>
+  </div>
+</div>
+
+<div id="changelogModal">
+  <div class="changelog-card">
+    <h2>배달권역 업데이트 소식</h2>
+    <div class="cl-date" id="clDate"></div>
+    <div id="clBody"></div>
+    <button class="changelog-close-btn" id="clCloseBtn">확인했어요</button>
+  </div>
+</div>
+
+<div class="generic-modal" id="zoneDongModal">
+  <div class="card">
+    <h2 id="zdTitle"></h2>
+    <div class="subtitle" id="zdSubtitle"></div>
+    <div id="zdBody"></div>
+    <button class="close-btn" id="zdCloseBtn">닫기</button>
+  </div>
+</div>
+
+<div class="app" id="appRoot">
+
+  <button class="sidebar-toggle-btn" id="sidebarToggleBtn" title="필터 패널 접기/펼치기">✕</button>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ================= 사이드바 ================= -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>배달권역 지도</h1>
+      <p>카카오맵 기반 · 실데이터 <span id="totalCount">0</span>개 권역</p>
+    </div>
+
+    <div class="section">
+      <h2>지도 옵션</h2>
+
+      <div class="toggle-row">
+        <div>
+          <div class="label">지적편집도 표시</div>
+          <div class="desc">카카오맵 내장 용도지역 레이어 (행정동 경계 아님)</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="districtToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="label">배달권역 표시</div>
+          <div class="desc">권역 폴리곤 전체 ON/OFF</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="zoneToggle" checked="">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="label">행정동 경계선 표시</div>
+          <div class="desc" id="admdongDesc">지역 필터에서 지원 지역 선택 시 활성화</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="admdongToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="range-row">
+        <label><span>권역 채우기 투명도</span><span id="opacityVal">40%</span></label>
+        <input type="range" id="opacitySlider" min="0" max="100" value="40">
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>필터</h2>
+      <div class="field">
+        <select id="citySelect">
+          <option value="__all__">전체 지역</option>
+      </select>
+      </div>
+      <div class="field">
+        <div class="multi-select" id="agentMultiSelect">
+          <button type="button" class="multi-select-btn" id="agentMultiSelectBtn">
+            <span id="agentMultiSelectLabel">전체 대행사</span>
+            <span class="multi-select-arrow">▾</span>
+          </button>
+          <div class="multi-select-panel" id="agentMultiSelectPanel"></div>
+        </div>
+      </div>
+      <div class="field">
+        <input type="text" id="searchInput" placeholder="권역명 검색, 쉼표로 여러개 (예: 강남,역삼)">
+      </div>
+      <!-- [반경 필터] + [매장 검색] 위치(매장 또는 좌표) 기준 반경 이내 권역만 표시 -->
+      <div class="field radius-field">
+        <div class="radius-title">위치 기준 인접 권역</div>
+        <div class="vendor-row">
+          <input type="text" id="vendorIdInput" placeholder="매장 검색 (vendor_id) 예: 1277781" inputmode="numeric" autocomplete="off">
+          <button type="button" class="radius-btn" id="vendorSearchBtn">검색</button>
+        </div>
+        <div class="vendor-result" id="vendorResult"></div>
+        <input type="text" id="radiusCoordInput" placeholder="또는 좌표 입력 (위도, 경도) 예: 37.5006, 127.0364" autocomplete="off" style="margin-top:8px;">
+        <div class="radius-row">
+          <div class="radius-km">
+            <input type="number" id="radiusKmInput" value="4" min="0.1" max="100" step="0.5">
+            <span>km 이내</span>
+          </div>
+          <button type="button" class="radius-btn" id="radiusApplyBtn">적용</button>
+          <button type="button" class="radius-btn secondary" id="radiusClearBtn">해제</button>
+        </div>
+        <div class="radius-status" id="radiusStatus"></div>
+        <div class="radius-status" id="vendorFresh"></div>
+      </div>
+    </div>
+
+    <div class="zone-list-wrap">
+      <div class="list-count" id="listCount">0개 표시</div>
+      <ul class="zone-list" id="zoneList"></ul>
+    </div>
+
+    <div class="section" style="border-bottom:none;">
+      <p class="legend-note">
+        <b>지적편집도</b>는 카카오맵 기본 레이어(용도지역 정보)입니다.<br><br>
+        <b>행정동 경계선</b>은 통계청 데이터 기반 GeoJSON을 별도로 불러와 표시합니다.
+        전국 모든 지역을 지원하며(세종은 충청에 포함), 지역 필터에서 지역을 선택하면 토글이 활성화됩니다.
+        다른 지역은 데이터 추가 후 지원 예정입니다.
+      </p>
+    </div>
+  </aside>
+
+  <!-- ================= 지도 ================= -->
+  <div class="map-wrap">
+    <div class="map-badge">배달권역 <span id="zoneCountBadge">0</span>개 표시 중</div>
+
+    <div class="top-search-wrap">
+      <div class="top-search-box">
+        <input type="text" id="addressSearchInput" placeholder="주소 또는 장소명 검색">
+        <button id="addressClearBtn" class="secondary-btn" title="검색 취소" style="display:none;">✕</button>
+        <button id="addressSearchBtn">검색</button>
+        <button id="myLocationBtn" class="secondary-btn" title="내 위치로 검색">📍</button>
+      </div>
+      <div class="search-results-dropdown" id="searchResultsDropdown"></div>
+      <div class="zone-result-toast" id="zoneResultToast"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="loading-overlay">
+      <div class="box">
+        <h2>데이터 불러오는 중...</h2>
+        <p>zones.json과 카카오맵 SDK를 불러오고 있어요.</p>
+      </div>
+    </div>
+
+    <div id="api-key-warning" style="display:none;">
+      <div class="box">
+        <h2>카카오 JS 키를 확인해주세요</h2>
+        <p>
+          <code>KAKAO_JS_KEY</code> 값이 비어있거나, 현재 접속 도메인이<br>
+          카카오 디벨로퍼스에 등록된 JavaScript SDK 도메인과 다릅니다.<br><br>
+          내 애플리케이션 &gt; 플랫폼 &gt; Web 도메인 등록을 확인해주세요.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* =========================================================================
+   0) 설정
+========================================================================= */
+const KAKAO_JS_KEY = "9b4bddbadae09bdcf433079afe6487d0";
+const ZONES_JSON_URL = "./zones.json"; // zones.json을 html과 같은 폴더에 두세요
+const CHANGELOG_JSON_URL = "./changelog.json"; // 변경 이력 파일 (없어도 정상 동작함)
+const CHANGELOG_SEEN_KEY = "delivery_map_changelog_seen_ts";
+
+/* 지역 필터(city_nm, 배달권역 엑셀 기준) -> 행정동 경계 파일(시/도 단위) 매핑
+   파일이 준비된 지역만 값이 채워져 있습니다. 다른 지역은 admdong_xxx.json을
+   추가하고 여기에 항목을 넣어주면 자동으로 지원됩니다. */
+const ADMDONG_FILE_MAP = {
+  "서울": ["./admdong_서울특별시.json"],
+  "경기": ["./admdong_경기도.json"],
+  "인천": ["./admdong_인천광역시.json"],
+  "강원": ["./admdong_강원도.json"],
+  "부산": ["./admdong_부산광역시.json"],
+  "광주": ["./admdong_광주광역시.json"],
+  "대전": ["./admdong_대전광역시.json"],
+  "대구": ["./admdong_대구광역시.json"],
+  "울산": ["./admdong_울산광역시.json"],
+  "제주": ["./admdong_제주특별자치도.json"],
+  "경상": ["./admdong_경상남도.json", "./admdong_경상북도.json"],
+  "전라": ["./admdong_전라남도.json", "./admdong_전라북도.json"],
+  "충청": ["./admdong_충청남도.json", "./admdong_충청북도.json", "./admdong_세종특별자치시.json"]
+};
+
+/* =========================================================================
+   1) 카카오맵 SDK 동적 로드
+========================================================================= */
+function loadKakaoSdk(appKey) {
+  return new Promise((resolve, reject) => {
+    if (!appKey) { reject(new Error("NO_KEY")); return; }
+    const script = document.createElement("script");
+    script.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&autoload=false&libraries=services`;
+    script.onload = () => window.kakao.maps.load(resolve);
+    script.onerror = () => reject(new Error("SDK_LOAD_FAIL"));
+    document.head.appendChild(script);
+  });
+}
+
+/* =========================================================================
+   2) 전역 상태
+========================================================================= */
+let map;
+let infoWindow;
+let zones = [];          // zones.json 파싱 결과
+let currentOpacity = 0.4;
+let cityFilter = "__all__";
+let agentFilters = []; // 선택된 대행사 목록 (빈 배열 = 전체)
+let searchTerms = []; // 콤마/공백으로 구분된 복수 검색어
+
+let admdongPolygons = [];      // 현재 지도에 그려진 행정동 경계 Polygon들
+let admdongLabels = [];        // 현재 지도에 그려진 행정동 이름 라벨(CustomOverlay)들
+const ADMDONG_LABEL_MIN_LEVEL = 7; // 이 레벨보다 확대(숫자가 작을수록 확대)됐을 때만 라벨 표시
+let admdongCache = {};         // { "서울": [...파싱된 행정동 데이터] } 캐시
+let admdongLoading = false;
+
+let placesService = null;
+let geocoderService = null;
+let searchMarker = null;
+
+/* [반경 필터] */
+let radiusFilter = null;      // { lat, lng, km, ids:Set } - 반경 필터가 켜져 있을 때만 값 있음
+let radiusCircleLine = null;  // 지도에 그려지는 반경 원(점선)
+let radiusMarker = null;      // 반경 중심 마커
+
+/* =========================================================================
+   3) zones.json 구조
+   ---------------------------------------------------------------------
+   [
+     {
+       "id": "z0000",
+       "city": "서울",
+       "name": "강남",
+       "color": "#ffcc33",
+       "parts": [                 // 권역이 여러 조각(멀티폴리곤)일 수 있음
+         [ [lat,lng], [lat,lng], ... ],  // part 1 (외곽선 좌표들)
+         [ [lat,lng], [lat,lng], ... ]   // part 2 (있는 경우)
+       ]
+     },
+     ...
+   ]
+========================================================================= */
+async function loadZones() {
+  const res = await fetch(ZONES_JSON_URL);
+  if (!res.ok) throw new Error("ZONES_FETCH_FAIL");
+  return res.json();
+}
+
+/* 권역 채우기색보다 테두리를 뚜렷하게 보이도록 어둡게 만드는 유틸 */
+function darkenColor(hex, amount) {
+  const num = parseInt(hex.replace("#", ""), 16);
+  let r = (num >> 16) - amount;
+  let g = ((num >> 8) & 0x00ff) - amount;
+  let b = (num & 0x0000ff) - amount;
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+  return "#" + ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0");
+}
+
+/* =========================================================================
+   4) 지도 초기화
+========================================================================= */
+function initMap() {
+  const container = document.getElementById("map");
+  const center = new kakao.maps.LatLng(36.2, 127.9); // 대한민국 중심 부근
+
+  map = new kakao.maps.Map(container, { center, level: 13 });
+  infoWindow = new kakao.maps.InfoWindow({ removable: true });
+  kakao.maps.event.addListener(map, "zoom_changed", updateAdmdongLabelVisibility);
+  placesService = new kakao.maps.services.Places();
+  geocoderService = new kakao.maps.services.Geocoder();
+
+  renderZonePolygons();
+  populateCitySelect();
+  populateAgentMultiSelect();
+  bindAgentMultiSelectToggle();
+  renderZoneList();
+  bindControls();
+  bindAddressSearch();
+  applyFilter();
+  updateAdmdongAvailability();
+
+  document.getElementById("totalCount").textContent = zones.length;
+}
+
+/* 권역 클릭 시 뜨는 정보창(infoWindow) 내용 - 존타입/멀티/대행사 요약 + 상세보기 버튼 */
+function zoneInfoWindowHtml(zone) {
+  const typeChip = zone.zoneType
+    ? `<span class="iw-badge ${zone.zoneType === "Hybrid" ? "iw-hybrid" : "iw-only3pl"}">${zone.zoneType}</span>`
+    : "";
+  const multiChip = zone.multi ? `<span class="iw-badge iw-multi">멀티</span>` : "";
+  const agentText = (zone.agents && zone.agents.length > 0) ? zone.agents.join(", ") : "-";
+
+  return `
+    <div class="info-window">
+      <b>${zone.city} · ${zone.name}</b><br/>
+      ${typeChip}${multiChip}
+      <div style="margin-top:6px;">대행사: ${agentText}</div>
+      <button class="iw-detail-btn" onclick="window.__openZoneModal('${zone.id}')">상세보기</button>
+    </div>
+  `;
+}
+
+// infoWindow는 순수 HTML 문자열이라 클로저를 못 써서, 전역에서 zone.id로 조회하는 방식 사용
+window.__openZoneModal = function (zoneId) {
+  const zone = zones.find(z => z.id === zoneId);
+  if (zone) showZoneDongModal(zone);
+};
+
+function renderZonePolygons() {
+  zones.forEach(zone => {
+    zone.polygons = zone.parts.map(part => {
+      const path = part.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
+      const polygon = new kakao.maps.Polygon({
+        path,
+        strokeWeight: 3,
+        strokeColor: darkenColor(zone.color, 60),
+        strokeOpacity: 1,
+        strokeStyle: "solid",
+        fillColor: zone.color,
+        fillOpacity: currentOpacity
+      });
+
+      kakao.maps.event.addListener(polygon, "click", (mouseEvent) => {
+        infoWindow.setContent(zoneInfoWindowHtml(zone));
+        infoWindow.setPosition(mouseEvent.latLng);
+        infoWindow.open(map);
+      });
+      kakao.maps.event.addListener(polygon, "mouseover", () => {
+        polygon.setOptions({ fillOpacity: Math.min(currentOpacity + 0.25, 0.85), strokeWeight: 4 });
+      });
+      kakao.maps.event.addListener(polygon, "mouseout", () => {
+        polygon.setOptions({ fillOpacity: currentOpacity, strokeWeight: 3 });
+      });
+
+      return polygon;
+    });
+  });
+}
+
+function populateCitySelect() {
+  const select = document.getElementById("citySelect");
+  const counts = {};
+  zones.forEach(z => { counts[z.city] = (counts[z.city] || 0) + 1; });
+
+  Object.keys(counts).sort((a, b) => counts[b] - counts[a]).forEach(city => {
+    const opt = document.createElement("option");
+    opt.value = city;
+    opt.textContent = `${city} (${counts[city]})`;
+    select.appendChild(opt);
+  });
+}
+
+function populateAgentMultiSelect() {
+  const panel = document.getElementById("agentMultiSelectPanel");
+  const counts = {};
+  zones.forEach(z => {
+    (z.agents || []).forEach(agent => {
+      counts[agent] = (counts[agent] || 0) + 1;
+    });
+  });
+
+  const agentNames = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+  panel.innerHTML = `
+    <label class="multi-select-option">
+      <input type="checkbox" id="agentOptAll" checked />
+      <span>전체 대행사</span>
+    </label>
+    <div class="multi-select-divider"></div>
+    ${agentNames.map(agent => `
+      <label class="multi-select-option">
+        <input type="checkbox" class="agent-opt-checkbox" value="${agent}" />
+        <span>${agent}</span>
+        <span class="opt-count">${counts[agent]}</span>
+      </label>
+    `).join("")}
+  `;
+
+  document.getElementById("agentOptAll").addEventListener("change", (e) => {
+    if (e.target.checked) {
+      agentFilters = [];
+      panel.querySelectorAll(".agent-opt-checkbox").forEach(cb => { cb.checked = false; });
+      onAgentFilterChange();
+    }
+  });
+
+  panel.querySelectorAll(".agent-opt-checkbox").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const checked = Array.from(panel.querySelectorAll(".agent-opt-checkbox:checked")).map(c => c.value);
+      agentFilters = checked;
+      document.getElementById("agentOptAll").checked = checked.length === 0;
+      onAgentFilterChange();
+    });
+  });
+}
+
+function onAgentFilterChange() {
+  const label = document.getElementById("agentMultiSelectLabel");
+  label.textContent = agentFilters.length === 0
+    ? "전체 대행사"
+    : `${agentFilters.join(", ")} (${agentFilters.length}개 선택)`;
+
+  applyFilter();
+  if (document.getElementById("admdongToggle").checked) {
+    renderAdmdongForCurrentCity();
+  }
+}
+
+function bindAgentMultiSelectToggle() {
+  const wrap = document.getElementById("agentMultiSelect");
+  const btn = document.getElementById("agentMultiSelectBtn");
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    wrap.classList.toggle("open");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!wrap.contains(e.target)) {
+      wrap.classList.remove("open");
+    }
+  });
+}
+
+function getFilteredZones() {
+  return zones.filter(z => {
+    const matchCity = cityFilter === "__all__" || z.city === cityFilter;
+    // 선택된 대행사가 전부 포함되어 있어야 통과 (AND 조건) - 아무것도 선택 안 하면 전체 통과
+    const matchAgent = agentFilters.length === 0 ||
+      agentFilters.every(agent => (z.agents || []).includes(agent));
+    const matchSearch = searchTerms.length === 0 ||
+      searchTerms.some(term =>
+        z.name.toLowerCase().includes(term) || z.city.toLowerCase().includes(term)
+      );
+    const matchRadius = !radiusFilter || radiusFilter.ids.has(z.id); // [반경 필터]
+    return matchCity && matchAgent && matchSearch && matchRadius;
+  });
+}
+
+function renderZoneList() {
+  const listEl = document.getElementById("zoneList");
+  const countEl = document.getElementById("listCount");
+  const filtered = getFilteredZones();
+
+  listEl.innerHTML = "";
+  countEl.textContent = `${filtered.length}개 표시`;
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<li class="list-empty">조건에 맞는 권역이 없습니다</li>`;
+    return;
+  }
+
+  filtered.forEach(zone => {
+    const li = document.createElement("li");
+    li.className = "zone-item";
+    li.innerHTML = `
+      <span class="zone-swatch" style="background:${zone.color}"></span>
+      <span class="zone-name">${zone.name}</span>
+      ${zone.zoneType ? `<span class="zone-type-mini ${zone.zoneType === "Hybrid" ? "hybrid" : "only3pl"}">${zone.zoneType}</span>` : ""}
+      <span class="zone-city">${zone.city}</span>
+      <button class="zone-dong-btn" title="포함된 행정동 보기">행정동</button>
+    `;
+    li.addEventListener("click", () => {
+      const bounds = new kakao.maps.LatLngBounds();
+      zone.parts.forEach(part => part.forEach(([lat, lng]) => bounds.extend(new kakao.maps.LatLng(lat, lng))));
+      map.setBounds(bounds);
+      document.querySelectorAll(".zone-item").forEach(el => el.classList.remove("active"));
+      li.classList.add("active");
+    });
+    li.querySelector(".zone-dong-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      showZoneDongModal(zone);
+    });
+    listEl.appendChild(li);
+  });
+}
+
+/* =========================================================================
+   4.5) 행정동 경계선 (실제 행정동, 지역별 lazy load)
+========================================================================= */
+function updateAdmdongAvailability() {
+  const toggle = document.getElementById("admdongToggle");
+  const desc = document.getElementById("admdongDesc");
+  const available = !!ADMDONG_FILE_MAP[cityFilter];
+
+  if (!available) {
+    toggle.checked = false;
+    toggle.disabled = true;
+    desc.textContent = cityFilter === "__all__"
+      ? "지역 필터에서 지원 지역 선택 시 활성화"
+      : `${cityFilter} 지역은 아직 데이터가 없어요`;
+    clearAdmdongPolygons();
+  } else {
+    toggle.disabled = false;
+    desc.textContent = `${cityFilter} 행정동 경계 표시 가능`;
+  }
+}
+
+function clearAdmdongPolygons() {
+  admdongPolygons.forEach(p => p.setMap(null));
+  admdongPolygons = [];
+  admdongLabels.forEach(l => l.setMap(null));
+  admdongLabels = [];
+  selectedDongPolygons = [];
+  selectedDongLabelEl = null;
+}
+
+function shortDongName(fullName) {
+  // "서울특별시 종로구 사직동" -> "사직동"
+  const tokens = fullName.trim().split(/\s+/);
+  return tokens[tokens.length - 1];
+}
+
+function centroidOf(part) {
+  let sumLat = 0, sumLng = 0;
+  part.forEach(([lat, lng]) => { sumLat += lat; sumLng += lng; });
+  return [sumLat / part.length, sumLng / part.length];
+}
+
+function getDongCentroid(dong) {
+  // 파트가 여러 개(섬 등)면 꼭짓점이 가장 많은(=가장 큰) 파트의 중심을 대표점으로 사용
+  let biggestPart = dong.parts[0];
+  dong.parts.forEach(part => {
+    if (part.length > biggestPart.length) biggestPart = part;
+  });
+  return centroidOf(biggestPart);
+}
+
+function updateAdmdongLabelVisibility() {
+  const show = map.getLevel() <= ADMDONG_LABEL_MIN_LEVEL;
+  admdongLabels.forEach(l => l.setMap(show ? map : null));
+}
+
+async function loadAdmdongForCity(city) {
+  if (admdongCache[city]) return admdongCache[city];
+
+  const files = ADMDONG_FILE_MAP[city] || [];
+  const all = [];
+  for (const url of files) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("ADMDONG_FETCH_FAIL: " + url);
+    const data = await res.json();
+    all.push(...data);
+  }
+  admdongCache[city] = all;
+  return all;
+}
+
+/* 권역명 검색어가 있으면, 검색된 권역 안에 속하는 행정동만 남김 (중심점 기준) */
+function filterDongsBySearch(dongs) {
+  if (searchTerms.length === 0 && !radiusFilter) return dongs; // [반경 필터]
+
+  const matchingZones = getFilteredZones(); // cityFilter + searchTerms 반영된 권역 목록
+  if (matchingZones.length === 0) return [];
+
+  return dongs.filter(dong => {
+    const [cLat, cLng] = getDongCentroid(dong);
+    return matchingZones.some(zone =>
+      zone.parts.some(part => isPointInRing(cLat, cLng, part)) ||
+      partsIntersect(zone.parts, dong.parts)
+    );
+  });
+}
+
+async function renderAdmdongForCurrentCity() {
+  clearAdmdongPolygons();
+  if (!ADMDONG_FILE_MAP[cityFilter]) return;
+
+  admdongLoading = true;
+  try {
+    const allDongs = await loadAdmdongForCity(cityFilter);
+    const dongs = filterDongsBySearch(allDongs);
+    dongs.forEach(dong => {
+      dong.polygons = []; // 이 행정동에 속한 폴리곤들 (하이라이트용 참조)
+
+      const [cLat, cLng] = getDongCentroid(dong);
+      const labelDiv = document.createElement("div");
+      labelDiv.className = "admdong-label";
+      labelDiv.textContent = shortDongName(dong.name);
+      labelDiv.addEventListener("click", () => selectDong(dong, labelDiv));
+      const label = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(cLat, cLng),
+        content: labelDiv,
+        yAnchor: 0.5,
+        zIndex: 10
+      });
+      label.setMap(map.getLevel() <= ADMDONG_LABEL_MIN_LEVEL ? map : null);
+      dong.labelDiv = labelDiv;
+      admdongLabels.push(label);
+
+      dong.parts.forEach(part => {
+        const path = part.map(([lat, lng]) => new kakao.maps.LatLng(lat, lng));
+        const polygon = new kakao.maps.Polygon({
+          path,
+          strokeWeight: 2.2,
+          strokeColor: "#00e5ff",
+          strokeOpacity: 1,
+          strokeStyle: "solid",
+          fillColor: "#00e5ff",
+          fillOpacity: 0 // 테두리만 표시, 채우기 없음 (선택 시에는 진하게 바뀜)
+        });
+        kakao.maps.event.addListener(polygon, "mouseover", () => {
+          polygon.setOptions({ strokeWeight: 3.5, strokeColor: "#ff5252" });
+        });
+        kakao.maps.event.addListener(polygon, "mouseout", () => {
+          polygon.setOptions({ strokeWeight: 2.2, strokeColor: "#00e5ff" });
+        });
+        kakao.maps.event.addListener(polygon, "click", (mouseEvent) => {
+          selectDong(dong, dong.labelDiv);
+          infoWindow.setContent(`<div class="info-window"><b>${dong.name}</b></div>`);
+          infoWindow.setPosition(mouseEvent.latLng);
+          infoWindow.open(map);
+        });
+        polygon.setMap(map);
+        dong.polygons.push(polygon);
+        admdongPolygons.push(polygon);
+      });
+    });
+  } catch (err) {
+    console.error(err);
+  } finally {
+    admdongLoading = false;
+  }
+}
+
+/* 클릭한 행정동을 진하게 강조 표시 (이전 선택은 원래대로 되돌림) */
+let selectedDongPolygons = [];
+let selectedDongLabelEl = null;
+
+function selectDong(dong, labelDiv) {
+  // 이전 선택 해제
+  selectedDongPolygons.forEach(p => p.setOptions({ fillOpacity: 0 }));
+  if (selectedDongLabelEl) selectedDongLabelEl.classList.remove("selected");
+
+  // 같은 행정동을 다시 클릭하면 선택 해제만 하고 끝
+  const isSameDong = selectedDongPolygons.length > 0 && dong.polygons && selectedDongPolygons[0] === dong.polygons[0];
+  if (isSameDong) {
+    selectedDongPolygons = [];
+    selectedDongLabelEl = null;
+    return;
+  }
+
+  dong.polygons.forEach(p => p.setOptions({ fillColor: "#00e5ff", fillOpacity: 0.4 }));
+  if (labelDiv) labelDiv.classList.add("selected");
+
+  selectedDongPolygons = dong.polygons;
+  selectedDongLabelEl = labelDiv || null;
+}
+
+/* =========================================================================
+   4.7) 상단 주소/장소 검색 (카카오 Places API) + 배달권역 판별
+========================================================================= */
+function bindAddressSearch() {
+  const input = document.getElementById("addressSearchInput");
+  const btn = document.getElementById("addressSearchBtn");
+  const clearBtn = document.getElementById("addressClearBtn");
+
+  const runSearch = async () => {
+    const keyword = input.value.trim();
+    if (!keyword) return;
+    hideZoneResultToast();
+
+    const [addressResults, placeResults] = await Promise.all([
+      searchAddress(keyword),
+      searchPlaces(keyword)
+    ]);
+
+    // 주소 검색 결과를 위쪽에, 장소(상호명) 검색 결과를 아래쪽에 배치
+    const combined = [...addressResults, ...placeResults].slice(0, 8);
+    renderSearchResults(combined);
+  };
+
+  btn.addEventListener("click", runSearch);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runSearch();
+  });
+  input.addEventListener("input", updateAddressClearBtn);
+  clearBtn.addEventListener("click", clearAddressSearch);
+
+  document.getElementById("myLocationBtn").addEventListener("click", useMyLocation);
+}
+
+function updateAddressClearBtn() {
+  const input = document.getElementById("addressSearchInput");
+  document.getElementById("addressClearBtn").style.display = input.value.trim() ? "flex" : "none";
+}
+
+function clearAddressSearch() {
+  const input = document.getElementById("addressSearchInput");
+  input.value = "";
+  document.getElementById("searchResultsDropdown").classList.remove("show");
+  document.getElementById("searchResultsDropdown").innerHTML = "";
+  hideZoneResultToast();
+  if (searchMarker) {
+    searchMarker.setMap(null);
+    searchMarker = null;
+  }
+  updateAddressClearBtn();
+  input.focus();
+}
+
+function useMyLocation() {
+  if (!navigator.geolocation) {
+    alert("이 브라우저는 위치 정보를 지원하지 않습니다.");
+    return;
+  }
+
+  const btn = document.getElementById("myLocationBtn");
+  btn.textContent = "…";
+  hideZoneResultToast();
+  document.getElementById("searchResultsDropdown").classList.remove("show");
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      btn.textContent = "📍";
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const position = new kakao.maps.LatLng(lat, lng);
+
+      map.setLevel(4);
+      map.setCenter(position);
+
+      if (searchMarker) searchMarker.setMap(null);
+      searchMarker = new kakao.maps.Marker({ position, map });
+
+      document.getElementById("addressSearchInput").value = "내 위치";
+      updateAddressClearBtn();
+      showZoneResultForPoint(lat, lng);
+    },
+    (err) => {
+      btn.textContent = "📍";
+      alert("위치 정보를 가져오지 못했습니다. 브라우저의 위치 권한을 확인해주세요.");
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
+/* 지번/도로명 주소 검색 (예: "역삼동 724-4", "테헤란로 34길 41") */
+function searchAddress(keyword) {
+  return new Promise(resolve => {
+    geocoderService.addressSearch(keyword, (results, status) => {
+      if (status !== kakao.maps.services.Status.OK) {
+        resolve([]);
+        return;
+      }
+      const normalized = results.map(addr => ({
+        place_name: addr.address_name,
+        road_address_name: addr.road_address ? addr.road_address.address_name : "",
+        address_name: addr.address_name,
+        x: addr.x,
+        y: addr.y,
+        isAddress: true
+      }));
+      resolve(normalized);
+    });
+  });
+}
+
+/* 상호명/장소 키워드 검색 (예: "역삼역 스타벅스") */
+function searchPlaces(keyword) {
+  return new Promise(resolve => {
+    placesService.keywordSearch(keyword, (results, status) => {
+      if (status !== kakao.maps.services.Status.OK) {
+        resolve([]);
+        return;
+      }
+      resolve(results.slice(0, 6));
+    });
+  });
+}
+
+function renderSearchResults(results) {
+  const dropdown = document.getElementById("searchResultsDropdown");
+  dropdown.innerHTML = "";
+
+  if (results.length === 0) {
+    dropdown.innerHTML = `<div class="search-result-item">검색 결과가 없습니다</div>`;
+    dropdown.classList.add("show");
+    return;
+  }
+
+  results.forEach(place => {
+    const item = document.createElement("div");
+    item.className = "search-result-item";
+    const tag = place.isAddress ? "주소" : "장소";
+    item.innerHTML = `
+      <div class="r-name">[${tag}] ${place.place_name}</div>
+      <div class="r-addr">${place.road_address_name || place.address_name || ""}</div>
+    `;
+    item.addEventListener("click", () => selectSearchResult(place));
+    dropdown.appendChild(item);
+  });
+  dropdown.classList.add("show");
+}
+
+function selectSearchResult(place) {
+  const lat = parseFloat(place.y);
+  const lng = parseFloat(place.x);
+  const position = new kakao.maps.LatLng(lat, lng);
+
+  map.setLevel(4);
+  map.setCenter(position);
+
+  if (searchMarker) searchMarker.setMap(null);
+  searchMarker = new kakao.maps.Marker({ position, map });
+
+  document.getElementById("searchResultsDropdown").classList.remove("show");
+  document.getElementById("addressSearchInput").value = place.place_name;
+  updateAddressClearBtn();
+
+  showZoneResultForPoint(lat, lng);
+}
+
+/* Ray-casting 알고리즘으로 점(lat,lng)이 폴리곤 링 내부에 있는지 판별 */
+function isPointInRing(lat, lng, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [latI, lngI] = ring[i];
+    const [latJ, lngJ] = ring[j];
+    const intersect =
+      (lngI > lng) !== (lngJ > lng) &&
+      lat < ((latJ - latI) * (lng - lngI)) / (lngJ - lngI) + latI;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function findZonesContainingPoint(lat, lng) {
+  return zones.filter(zone => zone.parts.some(part => isPointInRing(lat, lng, part)));
+}
+
+/* =========================================================================
+   폴리곤 겹침(교집합) 판별 (Turf.js) - 행정동이 권역에 "일부라도" 걸치면 true
+========================================================================= */
+function partsToTurfMultiPolygon(parts) {
+  const coords = parts.map(ring => {
+    const flipped = ring.map(([lat, lng]) => [lng, lat]); // turf는 [lng,lat] 순서
+    const first = flipped[0];
+    const last = flipped[flipped.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+      flipped.push(first); // 링이 안 닫혀있으면 닫아줌
+    }
+    return [flipped];
+  });
+  return turf.multiPolygon(coords);
+}
+
+function partsIntersect(partsA, partsB) {
+  try {
+    return turf.booleanIntersects(partsToTurfMultiPolygon(partsA), partsToTurfMultiPolygon(partsB));
+  } catch (err) {
+    return false; // 좌표 이상 등으로 계산 실패 시 안전하게 false
+  }
+}
+
+function showZoneResultForPoint(lat, lng) {
+  const matches = findZonesContainingPoint(lat, lng);
+  const toast = document.getElementById("zoneResultToast");
+
+  if (matches.length === 0) {
+    toast.innerHTML = `<div class="zone-result-row">등록된 배달권역이 없는 위치입니다</div>`;
+  } else {
+    toast.innerHTML = matches
+      .map(z => `<div class="zone-result-row"><span class="swatch" style="background:${z.color}"></span>${z.city} · ${z.name}</div>`)
+      .join("");
+  }
+  toast.classList.add("show");
+}
+
+function hideZoneResultToast() {
+  document.getElementById("zoneResultToast").classList.remove("show");
+}
+
+/* =========================================================================
+   4.8) 선택한 권역에 포함된 행정동 목록
+   -----------------------------------------------------------------------
+   정확한 폴리곤 교집합 대신, 각 행정동의 대표 중심점이 해당 권역 폴리곤
+   내부에 있는지로 판별하는 근사 방식 (실사용에는 충분하고 계산이 가벼움)
+========================================================================= */
+async function showZoneDongModal(zone) {
+  const modal = document.getElementById("zoneDongModal");
+  const titleEl = document.getElementById("zdTitle");
+  const subtitleEl = document.getElementById("zdSubtitle");
+  const bodyEl = document.getElementById("zdBody");
+
+  titleEl.textContent = `${zone.city} · ${zone.name}`;
+  subtitleEl.textContent = "포함된 행정동 (폴리곤 겹침 기준)";
+
+  const metaHtml = zoneMetaHtml(zone);
+  bodyEl.innerHTML = `${metaHtml}<div class="loading-text">행정동 데이터 불러오는 중...</div>`;
+  modal.classList.add("show");
+
+  if (!ADMDONG_FILE_MAP[zone.city]) {
+    bodyEl.innerHTML = `${metaHtml}<div class="loading-text">이 지역은 아직 행정동 데이터가 없어요.</div>`;
+    return;
+  }
+
+  try {
+    const dongs = await loadAdmdongForCity(zone.city);
+    const matched = dongs
+      .map(dong => {
+        const [cLat, cLng] = getDongCentroid(dong);
+        const centroidInside = zone.parts.some(part => isPointInRing(cLat, cLng, part));
+        const overlaps = centroidInside || partsIntersect(zone.parts, dong.parts);
+        return { dong, full: centroidInside, overlaps };
+      })
+      .filter(m => m.overlaps);
+
+    if (matched.length === 0) {
+      bodyEl.innerHTML = `${metaHtml}<div class="loading-text">매칭되는 행정동을 찾지 못했어요.</div>`;
+      return;
+    }
+
+    subtitleEl.textContent = `포함된 행정동 ${matched.length}개 (일부만 걸치는 곳은 옅게 표시)`;
+    bodyEl.innerHTML = `
+      ${metaHtml}
+      <div class="dong-chip-list">
+        ${matched.map(m =>
+          `<span class="dong-chip${m.full ? "" : " dong-chip-partial"}" title="${m.full ? "중심점이 권역 안에 있음" : "권역과 일부만 겹침"}">${shortDongName(m.dong.name)}</span>`
+        ).join("")}
+      </div>
+    `;
+  } catch (err) {
+    bodyEl.innerHTML = `${metaHtml}<div class="loading-text">행정동 데이터를 불러오지 못했어요.</div>`;
+  }
+}
+
+/* 권역 상세정보(존타입/멀티여부/대행사) HTML 블록 */
+function zoneMetaHtml(zone) {
+  if (!zone.zoneType && !zone.agents) return "";
+
+  const typeBadgeClass = zone.zoneType === "Hybrid" ? "zone-badge-hybrid" : "zone-badge-only3pl";
+  const agentsHtml = (zone.agents && zone.agents.length > 0)
+    ? zone.agents.map(a => `<span class="agent-chip">${a}</span>`).join("")
+    : `<span class="loading-text" style="padding:0;">등록된 대행사 없음</span>`;
+
+  return `
+    <div class="zone-meta-block">
+      <div class="zone-meta-row">
+        <span class="zone-badge ${typeBadgeClass}">${zone.zoneType || "-"}</span>
+        ${zone.multi ? `<span class="zone-badge zone-badge-multi">멀티</span>` : ""}
+      </div>
+      <div class="zone-meta-label">대행사</div>
+      <div class="agent-chip-list">${agentsHtml}</div>
+    </div>
+  `;
+}
+
+function bindGenericModalClose(modalId, closeBtnId) {
+  document.getElementById(closeBtnId).addEventListener("click", () => {
+    document.getElementById(modalId).classList.remove("show");
+  });
+}
+
+/* =========================================================================
+   [반경 필터] 좌표 기준 반경(km) 이내 권역만 표시
+   - 권역의 일부라도 반경 안에 걸치면 표시 (좌표가 권역 안이면 거리 0으로 취급)
+========================================================================= */
+const KM_PER_DEG = 111.195; // 지구 반지름 6371km 기준, 위도 1도 = 약 111.195km
+
+/* "37.5006, 127.0364" / "37.5006 127.0364" / "(37.5006,127.0364)" -> { lat, lng }
+   경도,위도 순서로 넣은 경우(예: 127.03, 37.50)는 한국 범위 값이면 자동으로 뒤집어 줌 */
+function parseCoordInput(text) {
+  const nums = (text || "").match(/-?\d+(?:\.\d+)?/g);
+  if (!nums || nums.length !== 2) return null;
+  let a = parseFloat(nums[0]);
+  let b = parseFloat(nums[1]);
+  let swapped = false;
+  if (a >= 124 && a <= 132 && b >= 33 && b <= 39) { [a, b] = [b, a]; swapped = true; }
+  if (!(a >= -90 && a <= 90 && b >= -180 && b <= 180)) return null;
+  return { lat: a, lng: b, swapped };
+}
+
+/* 점(lat,lng)에서 폴리곤 외곽선(ring)까지의 최단 거리(km).
+   점을 원점으로 둔 평면 근사 - 수 km~수십 km 범위에서는 오차를 무시할 수 있음 */
+function distPointToRingKm(lat, lng, ring) {
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  let min = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const ax = (ring[j][1] - lng) * cosLat * KM_PER_DEG, ay = (ring[j][0] - lat) * KM_PER_DEG;
+    const bx = (ring[i][1] - lng) * cosLat * KM_PER_DEG, by = (ring[i][0] - lat) * KM_PER_DEG;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : -(ax * dx + ay * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+/* 점에서 권역(여러 조각 가능)까지의 최단 거리(km). 권역 안에 있으면 0 */
+function distPointToZoneKm(lat, lng, zone) {
+  let min = Infinity;
+  for (const part of zone.parts) {
+    if (isPointInRing(lat, lng, part)) return 0;
+    const d = distPointToRingKm(lat, lng, part);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+function setRadiusStatus(html, isError) {
+  const el = document.getElementById("radiusStatus");
+  el.innerHTML = html;
+  el.classList.toggle("error", !!isError);
+}
+
+function clearRadiusOverlay() {
+  if (radiusCircleLine) { radiusCircleLine.setMap(null); radiusCircleLine = null; }
+  if (radiusMarker) { radiusMarker.setMap(null); radiusMarker = null; }
+}
+
+/* 반경 원(점선) + 중심 마커를 그리고, 원이 한눈에 보이도록 지도 범위를 맞춤.
+   채움 없는 선(Polyline)으로 그려서 아래에 있는 권역 클릭을 가리지 않음 */
+function drawRadiusOverlay(lat, lng, km) {
+  clearRadiusOverlay();
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  const path = [];
+  const bounds = new kakao.maps.LatLngBounds();
+  const STEPS = 120;
+  for (let i = 0; i <= STEPS; i++) {
+    const rad = (i / STEPS) * 2 * Math.PI;
+    const p = new kakao.maps.LatLng(
+      lat + (km / KM_PER_DEG) * Math.sin(rad),
+      lng + (km / KM_PER_DEG / cosLat) * Math.cos(rad)
+    );
+    path.push(p);
+    bounds.extend(p);
+  }
+  radiusCircleLine = new kakao.maps.Polyline({
+    path,
+    strokeWeight: 3,
+    strokeColor: "#ff5252",
+    strokeOpacity: 0.9,
+    strokeStyle: "dash"
+  });
+  radiusCircleLine.setMap(map);
+  radiusMarker = new kakao.maps.Marker({ position: new kakao.maps.LatLng(lat, lng), map });
+  map.setBounds(bounds);
+}
+
+function applyRadiusFilter() {
+  const coordInput = document.getElementById("radiusCoordInput");
+  const coord = parseCoordInput(coordInput.value);
+  if (!coord) {
+    setRadiusStatus("좌표를 확인해주세요. 위도, 경도 순서로 입력 (예: 37.5006, 127.0364)", true);
+    return;
+  }
+  const km = parseFloat(document.getElementById("radiusKmInput").value);
+  if (!(km > 0 && km <= 100)) {
+    setRadiusStatus("반경은 0보다 크고 100km 이하로 입력해주세요.", true);
+    return;
+  }
+
+  const ids = new Set();
+  zones.forEach(z => {
+    if (distPointToZoneKm(coord.lat, coord.lng, z) <= km) ids.add(z.id);
+  });
+  radiusFilter = { lat: coord.lat, lng: coord.lng, km, ids };
+
+  if (coord.swapped) coordInput.value = `${coord.lat}, ${coord.lng}`;
+  drawRadiusOverlay(coord.lat, coord.lng, km);
+  applyFilter();
+  if (document.getElementById("admdongToggle").checked) renderAdmdongForCurrentCity();
+
+  setRadiusStatus(ids.size > 0
+    ? `반경 ${km}km 이내 권역 <b>${ids.size}개</b>`
+    : `반경 ${km}km 이내에 걸치는 권역이 없어요`);
+}
+
+function clearRadiusFilter() {
+  radiusFilter = null;
+  clearRadiusOverlay();
+  setRadiusStatus("");
+  clearVendorResult(); // [매장 검색]
+  applyFilter();
+  if (document.getElementById("admdongToggle").checked) renderAdmdongForCurrentCity();
+}
+
+function bindRadiusFilter() {
+  const coordInput = document.getElementById("radiusCoordInput");
+  const kmInput = document.getElementById("radiusKmInput");
+
+  document.getElementById("radiusApplyBtn").addEventListener("click", applyRadiusFilter);
+  document.getElementById("radiusClearBtn").addEventListener("click", () => {
+    coordInput.value = "";
+    document.getElementById("vendorIdInput").value = ""; // [매장 검색]
+    clearRadiusFilter();
+  });
+  coordInput.addEventListener("input", clearVendorResult); // [매장 검색] 좌표를 직접 고치면 이전 매장 결과는 지움
+  [coordInput, kmInput].forEach(el => {
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") applyRadiusFilter();
+    });
+  });
+
+  bindVendorSearch(); // [매장 검색]
+}
+
+/* =========================================================================
+   [매장 검색] vendor_id로 매장 좌표를 찾고, 그 위치 기준 반경 필터를 적용
+   - 매장 데이터는 ./vendors/ 아래에 vendor_id 구간별 파일로 나뉘어 있음
+     (index.json의 bucketSize로 구간을 계산 -> 해당 파일 1개만 받아서 검색)
+   - 파일은 매일 Apps Script가 BigQuery에서 만들어 GitHub에 올려둠
+========================================================================= */
+const VENDOR_BASE_URL = "./vendors/";
+let vendorIndex = null;          // vendors/index.json 내용
+const vendorShardCache = {};     // { 구간번호: [매장, ...] }
+let vendorSearchSeq = 0;         // 연속 검색 시 마지막 요청 결과만 반영하기 위한 번호
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function fetchVendorJson(url) {
+  // no-cache: 매번 서버에 "바뀌었나?"만 확인 (안 바뀌었으면 저장된 것 사용) -> 매일 갱신되는 데이터를 최신으로
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) {
+    const err = new Error("HTTP " + res.status);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+async function loadVendorIndex() {
+  if (!vendorIndex) vendorIndex = await fetchVendorJson(VENDOR_BASE_URL + "index.json");
+  return vendorIndex;
+}
+
+/* vendor_id로 매장 찾기. 없으면 null */
+async function findVendor(vendorId) {
+  const index = await loadVendorIndex();
+  const bucket = Math.floor(Number(vendorId) / index.bucketSize);
+  if (!index.buckets.includes(bucket)) return null;
+  if (!vendorShardCache[bucket]) {
+    vendorShardCache[bucket] = await fetchVendorJson(`${VENDOR_BASE_URL}${bucket}.json`);
+  }
+  return vendorShardCache[bucket].find(v => v.i === String(vendorId)) || null;
+}
+
+function showVendorFreshness() {
+  const el = document.getElementById("vendorFresh");
+  loadVendorIndex().then(index => {
+    const when = new Date(index.updatedAt).toLocaleString("ko-KR", {
+      timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+    });
+    el.textContent = `매장 데이터 기준: ${when} (${Number(index.count).toLocaleString("ko-KR")}개)`;
+  }).catch(() => { el.textContent = ""; });
+}
+
+function showVendorMessage(text, isError) {
+  const box = document.getElementById("vendorResult");
+  box.innerHTML = "";
+  const msg = document.createElement("div");
+  msg.className = "vendor-msg" + (isError ? " error" : "");
+  msg.textContent = text;
+  box.appendChild(msg);
+}
+
+/* 매장 이름 등은 외부 데이터라 innerHTML을 쓰지 않고 textContent로만 표시 */
+function showVendorResult(vendor) {
+  const box = document.getElementById("vendorResult");
+  box.innerHTML = "";
+
+  const name = document.createElement("div");
+  name.className = "vendor-name";
+  name.textContent = vendor.n || "(이름 없음)";
+  const id = document.createElement("span");
+  id.className = "vendor-id";
+  id.textContent = ` #${vendor.i}`;
+  name.appendChild(id);
+  box.appendChild(name);
+
+  const coord = document.createElement("div");
+  coord.className = "vendor-meta";
+  coord.textContent = `좌표 ${vendor.y}, ${vendor.x}`;
+  box.appendChild(coord);
+
+  const inZones = findZonesContainingPoint(vendor.y, vendor.x);
+  const zoneEl = document.createElement("div");
+  zoneEl.className = "vendor-meta";
+  zoneEl.textContent = inZones.length === 0
+    ? "속한 권역: 없음"
+    : "속한 권역: " + inZones.slice(0, 6).map(z => `${z.city} · ${z.name}`).join(", ") +
+      (inZones.length > 6 ? ` 외 ${inZones.length - 6}개` : "");
+  box.appendChild(zoneEl);
+}
+
+function clearVendorResult() {
+  document.getElementById("vendorResult").innerHTML = "";
+  if (infoWindow) infoWindow.close();
+}
+
+async function searchVendor() {
+  const raw = document.getElementById("vendorIdInput").value.trim();
+  if (!/^\d{1,12}$/.test(raw)) {
+    showVendorMessage("vendor_id는 숫자만 입력해주세요.", true);
+    return;
+  }
+  const vendorId = String(Number(raw)); // 앞자리 0 제거 (데이터의 id 형식과 맞춤)
+  const seq = ++vendorSearchSeq;
+  showVendorMessage("찾는 중...");
+
+  let vendor;
+  try {
+    vendor = await findVendor(vendorId);
+  } catch (err) {
+    if (seq !== vendorSearchSeq) return;
+    showVendorMessage(
+      err.status === 404
+        ? "매장 데이터 파일을 찾을 수 없어요. (vendors 폴더가 아직 올라오지 않았을 수 있어요)"
+        : "매장 데이터를 불러오지 못했어요. 잠시 후 다시 시도해주세요.",
+      true
+    );
+    return;
+  }
+  if (seq !== vendorSearchSeq) return; // 그 사이 다시 검색했으면 이전 결과는 버림
+
+  if (!vendor) {
+    showVendorMessage(`vendor_id ${vendorId} 매장을 찾지 못했어요. (영업 중이고 좌표가 있는 매장만 포함돼요)`, true);
+    return;
+  }
+
+  showVendorResult(vendor);
+  document.getElementById("radiusCoordInput").value = `${vendor.y}, ${vendor.x}`;
+  applyRadiusFilter(); // 반경 필터 재사용: 반경 원/마커/권역 필터/지도 이동
+
+  if (radiusFilter && radiusFilter.lat === vendor.y && radiusFilter.lng === vendor.x) {
+    infoWindow.setContent(
+      `<div class="info-window"><b>${escapeHtml(vendor.n || "(이름 없음)")}</b><br/>vendor_id ${escapeHtml(vendor.i)}</div>`
+    );
+    infoWindow.setPosition(new kakao.maps.LatLng(vendor.y, vendor.x));
+    infoWindow.open(map);
+  }
+}
+
+function bindVendorSearch() {
+  document.getElementById("vendorSearchBtn").addEventListener("click", searchVendor);
+  document.getElementById("vendorIdInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") searchVendor();
+  });
+  showVendorFreshness();
+}
+
+/* =========================================================================
+   5) 필터 적용 (지도 위 표시 여부 + 목록)
+========================================================================= */
+function applyFilter() {
+  const zoneToggleOn = document.getElementById("zoneToggle").checked;
+  const filteredIds = new Set(getFilteredZones().map(z => z.id));
+
+  let visibleCount = 0;
+  zones.forEach(zone => {
+    const shouldShow = zoneToggleOn && filteredIds.has(zone.id);
+    if (shouldShow) visibleCount++;
+    zone.polygons.forEach(p => p.setMap(shouldShow ? map : null));
+  });
+
+  document.getElementById("zoneCountBadge").textContent = visibleCount;
+  renderZoneList();
+}
+
+/* =========================================================================
+   6) 컨트롤 바인딩
+========================================================================= */
+function bindControls() {
+  document.getElementById("districtToggle").addEventListener("change", (e) => {
+    if (e.target.checked) {
+      map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+    } else {
+      map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+    }
+  });
+
+  document.getElementById("zoneToggle").addEventListener("change", applyFilter);
+
+  document.getElementById("opacitySlider").addEventListener("input", (e) => {
+    currentOpacity = Number(e.target.value) / 100;
+    document.getElementById("opacityVal").textContent = `${e.target.value}%`;
+    zones.forEach(zone => zone.polygons.forEach(p => p.setOptions({ fillOpacity: currentOpacity })));
+  });
+
+  document.getElementById("citySelect").addEventListener("change", (e) => {
+    cityFilter = e.target.value;
+    applyFilter();
+    updateAdmdongAvailability();
+    // 지역이 바뀌면 이전 지역의 행정동 경계는 지워줌 (토글은 유지, 다시 켜면 새 지역으로 로드)
+    if (document.getElementById("admdongToggle").checked) {
+      renderAdmdongForCurrentCity();
+    }
+  });
+
+  document.getElementById("searchInput").addEventListener("input", (e) => {
+    searchTerms = e.target.value
+      .toLowerCase()
+      .split(/[,\s]+/)      // 쉼표 또는 공백으로 구분
+      .map(t => t.trim())
+      .filter(t => t.length > 0);
+    applyFilter();
+    if (document.getElementById("admdongToggle").checked) {
+      renderAdmdongForCurrentCity();
+    }
+  });
+
+  document.getElementById("admdongToggle").addEventListener("change", (e) => {
+    if (e.target.checked) {
+      renderAdmdongForCurrentCity();
+    } else {
+      clearAdmdongPolygons();
+    }
+  });
+
+  bindGenericModalClose("zoneDongModal", "zdCloseBtn");
+
+  bindRadiusFilter(); // [반경 필터]
+
+  bindSidebarToggle();
+}
+
+/* =========================================================================
+   6.5) 사이드바(필터 패널) 접기/펼치기 + 모바일 대응
+========================================================================= */
+function setSidebarHidden(hidden) {
+  const appRoot = document.getElementById("appRoot");
+  appRoot.classList.toggle("sidebar-hidden", hidden);
+  document.getElementById("sidebarToggleBtn").textContent = hidden ? "☰" : "✕";
+}
+
+function bindSidebarToggle() {
+  const toggleBtn = document.getElementById("sidebarToggleBtn");
+  const backdrop = document.getElementById("sidebarBackdrop");
+  const appRoot = document.getElementById("appRoot");
+
+  toggleBtn.addEventListener("click", () => {
+    setSidebarHidden(!appRoot.classList.contains("sidebar-hidden"));
+  });
+  backdrop.addEventListener("click", () => setSidebarHidden(true));
+
+  // 모바일 화면에서는 지도부터 크게 보이도록 기본적으로 필터 패널을 접어둠
+  if (window.innerWidth <= 768) {
+    setSidebarHidden(true);
+  }
+}
+
+/* =========================================================================
+   6.7) 변경사항(changelog) 팝업
+   -----------------------------------------------------------------------
+   changelog.json은 Apps Script가 zones.json을 갱신할 때 자동으로 같이
+   기록해주는 파일. 마지막으로 본 시각(localStorage)보다 최신 이력이 있으면
+   접속 시 팝업으로 알려줌.
+========================================================================= */
+async function checkChangelog() {
+  try {
+    const res = await fetch(CHANGELOG_JSON_URL, { cache: "no-store" });
+    if (!res.ok) return; // changelog.json이 없어도 조용히 무시
+    const history = await res.json();
+    if (!Array.isArray(history) || history.length === 0) return;
+
+    const latest = history[history.length - 1];
+    const seenTs = Number(localStorage.getItem(CHANGELOG_SEEN_KEY) || 0);
+
+    if (latest.ts > seenTs) {
+      renderChangelogModal(latest);
+      document.getElementById("changelogModal").classList.add("show");
+    }
+  } catch (err) {
+    // changelog 확인 실패는 지도 사용에 영향 없어야 하므로 조용히 무시
+    console.warn("changelog 확인 실패:", err);
+  }
+}
+
+function changelogSectionHtml(label, dotClass, items) {
+  if (!items || items.length === 0) return "";
+  const listItems = items
+    .slice(0, 8)
+    .map(z => `<li>${z.city} · ${z.name}</li>`)
+    .join("");
+  const more = items.length > 8 ? `<li>외 ${items.length - 8}건</li>` : "";
+  return `
+    <div class="changelog-section">
+      <div class="cl-label"><span class="cl-dot ${dotClass}"></span>${label} (${items.length})</div>
+      <ul>${listItems}${more}</ul>
+    </div>
+  `;
+}
+
+function renderChangelogModal(entry) {
+  const dateEl = document.getElementById("clDate");
+  const bodyEl = document.getElementById("clBody");
+
+  const dateObj = new Date(entry.ts);
+  dateEl.textContent = dateObj.toLocaleString("ko-KR");
+
+  bodyEl.innerHTML =
+    changelogSectionHtml("추가된 권역", "added", entry.added) +
+    changelogSectionHtml("삭제된 권역", "removed", entry.removed) +
+    changelogSectionHtml("경계가 변경된 권역", "modified", entry.modified);
+
+  if (!bodyEl.innerHTML.trim()) {
+    bodyEl.innerHTML = `<p style="color:var(--text-dim); font-size:13px;">변경된 내용이 없습니다.</p>`;
+  }
+
+  document.getElementById("clCloseBtn").onclick = () => {
+    localStorage.setItem(CHANGELOG_SEEN_KEY, String(entry.ts));
+    document.getElementById("changelogModal").classList.remove("show");
+  };
+}
+
+/* =========================================================================
+   7) 부트스트랩 (구글 로그인 통과 후 호출됨)
+========================================================================= */
+async function bootApp() {
+  try {
+    const [_, zonesData] = await Promise.all([
+      loadKakaoSdk(KAKAO_JS_KEY),
+      loadZones()
+    ]);
+    zones = zonesData;
+    document.getElementById("loading-overlay").style.display = "none";
+    initMap();
+    checkChangelog(); // 새 업데이트 있으면 팝업으로 안내
+  } catch (err) {
+    document.getElementById("loading-overlay").style.display = "none";
+    if (err.message === "ZONES_FETCH_FAIL") {
+      document.getElementById("api-key-warning").innerHTML =
+        `<div class="box"><h2>zones.json을 찾을 수 없습니다</h2>
+         <p>delivery-zone-map.html과 같은 폴더에 zones.json 파일이 있는지 확인해주세요.</p></div>`;
+    }
+    document.getElementById("api-key-warning").style.display = "flex";
+  }
+}
+
+/* =========================================================================
+   8) 구글 로그인 게이트 (@wesang.com 계정 + 예외 이메일만 통과)
+========================================================================= */
+const AUTH_GATE_ENABLED = true;
+const ALLOWED_EMAIL_DOMAIN = "wesang.com";
+const ALLOWED_EXTRA_EMAILS = [
+  "zerojo90@gmail.com",
+  "vip7209@gmail.com"
+]; // 회사 도메인 밖에서 예외로 허용할 이메일
+const GOOGLE_CLIENT_ID = "675711039210-pgajt2m6j875rondi6gahj2nniu7euk5.apps.googleusercontent.com";
+const SESSION_KEY = "delivery_map_session";
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12시간 유지
+
+function parseJwt(token) {
+  const base64Url = token.split(".")[1];
+  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+  const json = decodeURIComponent(
+    atob(base64)
+      .split("")
+      .map(c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+      .join("")
+  );
+  return JSON.parse(json);
+}
+
+function grantAccess(email) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ email, ts: Date.now() }));
+  document.getElementById("loginGate").style.display = "none";
+  bootApp();
+}
+
+function handleGoogleCredential(response) {
+  try {
+    const payload = parseJwt(response.credential);
+    const email = (payload.email || "").toLowerCase();
+    const verified = payload.email_verified;
+    const domainOk = email.endsWith("@" + ALLOWED_EMAIL_DOMAIN) ||
+                      ALLOWED_EXTRA_EMAILS.includes(email);
+
+    if (verified && domainOk) {
+      grantAccess(email);
+    } else {
+      document.getElementById("loginError").classList.add("show");
+    }
+  } catch (e) {
+    document.getElementById("loginError").classList.add("show");
+  }
+}
+
+function checkExistingSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return false;
+    const { email, ts } = JSON.parse(raw);
+    const fresh = Date.now() - ts < SESSION_TTL_MS;
+    const emailLower = (email || "").toLowerCase();
+    const domainOk = emailLower.endsWith("@" + ALLOWED_EMAIL_DOMAIN) ||
+                      ALLOWED_EXTRA_EMAILS.includes(emailLower);
+    return fresh && domainOk;
+  } catch (e) {
+    return false;
+  }
+}
+
+window.addEventListener("load", () => {
+  if (!AUTH_GATE_ENABLED) {
+    document.getElementById("loginGate").style.display = "none";
+    bootApp();
+    return;
+  }
+
+  if (checkExistingSession()) {
+    document.getElementById("loginGate").style.display = "none";
+    bootApp();
+    return;
+  }
+
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleCredential
+  });
+  google.accounts.id.renderButton(
+    document.getElementById("googleSignInDiv"),
+    { theme: "outline", size: "large", text: "continue_with", locale: "ko" }
+  );
+});
+</script>
+
+
+
+</body></html>
