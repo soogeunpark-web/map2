@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주소로 존 찾기</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root{
+    --bg:#f6f5f2; --panel:#ffffff; --ink:#1b1d21; --sub:#6b6f76; --line:#e4e2dc;
+    --accent:#e0004d; --accent-ink:#fff; --warn:#b45309; --warn-bg:#fff6e5;
+    --z1:#2563eb; --z2:#db2777; --z3:#059669; --near:#ea580c;
+    --shadow:0 8px 30px rgba(20,20,30,.12);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:Pretendard,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;-webkit-font-smoothing:antialiased}
+  #map{position:fixed;inset:0;background:#e9e7e1}
+  .panel{position:fixed;top:16px;left:16px;width:360px;max-height:calc(100% - 32px);overflow:auto;
+    background:var(--panel);border-radius:16px;box-shadow:var(--shadow);z-index:1000;padding:18px 18px 14px}
+  h1{font-size:17px;margin:0;letter-spacing:-.02em}
+  .asof{font-size:12px;color:var(--sub);margin-top:4px}
+  form{display:flex;gap:8px;margin-top:14px}
+  input[type=search]{flex:1;min-width:0;height:44px;border:1.5px solid var(--line);border-radius:10px;padding:0 12px;
+    font:inherit;font-size:16px;font-variant-numeric:tabular-nums;outline:none;background:#fff;color:var(--ink)}
+  input[type=search]:focus{border-color:var(--ink)}
+  button.go{height:44px;padding:0 16px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);
+    font:inherit;font-weight:700;font-size:15px;cursor:pointer}
+  button.go:disabled{opacity:.5;cursor:default}
+  .msg{margin-top:12px;font-size:14px;color:var(--sub)}
+  .msg.err{color:#b91c1c}
+  .hint{margin-top:8px;font-size:12.5px;color:var(--sub)}
+  .alts{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+  .alts button{font:inherit;font-size:13px;text-align:left;border:0;background:none;padding:6px 8px;border-radius:8px;cursor:pointer;color:var(--ink)}
+  .alts button:hover{background:#f1efea}
+  .alts button small{color:var(--sub);margin-left:6px}
+  .card{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+  .vname{font-size:16px;font-weight:700;line-height:1.35;word-break:keep-all}
+  .vmeta{font-size:12.5px;color:var(--sub);margin-top:4px;font-variant-numeric:tabular-nums}
+  .actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .actions a,.actions button{font:inherit;font-size:12.5px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;
+    background:#fff;color:var(--ink);text-decoration:none;cursor:pointer}
+  .actions a:hover,.actions button:hover{border-color:var(--ink)}
+  .label{font-size:12px;font-weight:700;color:var(--sub);margin:16px 0 8px;letter-spacing:.02em}
+  .zone{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid var(--line);background:#fff;
+    border-radius:10px;padding:10px 12px;margin-bottom:6px;font:inherit;cursor:pointer;color:var(--ink)}
+  .zone:hover{border-color:var(--ink)}
+  .sw{width:12px;height:12px;border-radius:3px;flex:none}
+  .zname{font-weight:700;font-size:15px}
+  .zcity{font-size:12.5px;color:var(--sub)}
+  .zdist{margin-left:auto;font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+  .notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.45}
+  .foot{margin-top:16px;border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:10px}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;user-select:none}
+  .recent{display:flex;gap:6px;flex-wrap:wrap}
+  .recent button{font:inherit;font-size:12.5px;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:#fff;
+    cursor:pointer;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .recent button:hover{border-color:var(--ink)}
+  .leaflet-tooltip.zlabel{background:rgba(255,255,255,.92);border:0;box-shadow:0 1px 4px rgba(0,0,0,.2);
+    font-family:inherit;font-weight:700;font-size:13px;padding:3px 8px;border-radius:6px;color:var(--ink)}
+  .leaflet-tooltip.zlabel::before{display:none}
+  .leaflet-tooltip.hover{font-family:inherit;font-size:12.5px}
+  .leaflet-tooltip.rlabel{background:transparent;border:0;box-shadow:none;padding:0;font-family:inherit;
+    font-size:11px;font-weight:700;color:#1e3a8a;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff}
+  .leaflet-tooltip.rlabel::before{display:none}
+  #map.ring-sparse .leaflet-tooltip.rhalf{display:none}
+  .vpin{width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--accent);transform:rotate(-45deg);
+    border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+  @media (max-width:640px){
+    .panel{top:0;left:0;right:0;width:auto;border-radius:0 0 16px 16px;max-height:48%;padding:14px 16px 12px}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<section class="panel">
+  <h1>주소로 존 찾기</h1>
+  <div class="asof" id="asof">데이터 불러오는 중…</div>
+
+  <form id="f" autocomplete="off">
+    <input type="search" id="q" placeholder="주소 또는 장소명 (예: 테헤란로 152)" aria-label="주소 검색">
+    <button class="go" id="go" disabled>검색</button>
+  </form>
+
+  <div class="hint" id="hint">지도를 클릭해도 그 위치의 zone을 볼 수 있어요.</div>
+  <div id="out"></div>
+
+  <div class="foot">
+    <label class="toggle"><input type="checkbox" id="showRings" checked> 검색 위치 기준 500m 반경 표시</label>
+    <label class="toggle"><input type="checkbox" id="showAll" checked> 전체 zone 경계 표시</label>
+    <div class="recent" id="recent"></div>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
+<script>
+(() => {
+  const DATA = 'data';
+  const ZONE_COLORS = ['#2563eb', '#db2777', '#059669', '#7c3aed'];
+  const NEAR_COLOR = '#ea580c';
+  const NEAR_RADIUS = 4000;      // zone 밖일 때 주변 zone을 찾는 반경(m)
+  const NEAR_COLORS = ['#ea580c', '#0891b2', '#7c3aed', '#65a30d', '#c026d3', '#ca8a04', '#0d9488', '#be123c'];
+  const RING_STEP = 500;         // 반경 간격(m)
+  const RING_MAX = 15000;        // 최대 반경(m)
+  const RING_COLOR = '#2f6bff';
+
+  const $ = id => document.getElementById(id);
+  const state = { meta: null, zones: [] };
+
+  /* ---------- 지도 ---------- */
+  const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([36.35, 127.85], 7);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map);
+  const allLayer = L.layerGroup().addTo(map);
+  map.createPane('rings').style.zIndex = 390;   // 반경 링은 zone 경계·핀 아래에
+  const ringRenderer = L.canvas({ pane: 'rings' });
+  const ringLayer = L.layerGroup().addTo(map);
+  const hitLayer = L.layerGroup().addTo(map);
+
+  const toLatLngs = g => g.map(poly => poly.map(ring => ring.map(([x, y]) => [y, x])));
+
+  /* ---------- 데이터 ---------- */
+  async function loadJson(path, version) {
+    const url = `${DATA}/${path}` + (version ? `?v=${encodeURIComponent(version)}` : `?t=${Date.now()}`);
+    const r = await fetch(url, { cache: version ? 'default' : 'no-store' });
+    if (!r.ok) throw new Error(`${path} 불러오기 실패 (${r.status})`);
+    return r.json();
+  }
+
+
+  /* ---------- 주소 검색 (카카오 로컬) ---------- */
+  // developers.kakao.com 에서 발급한 JavaScript 키. 사이트 도메인 등록 필요
+  const KAKAO_JS_KEY = '82136ebec11b6d798851314630048f33';
+
+  let kakaoReady = null;
+  function kakaoServices() {
+    if (!kakaoReady) {
+      kakaoReady = new Promise((resolve, reject) => {
+        if (!KAKAO_JS_KEY || KAKAO_JS_KEY.startsWith('YOUR_')) return reject(new Error('index.html의 KAKAO_JS_KEY를 설정해야 주소 검색이 동작해요.'));
+        const s = document.createElement('script');
+        s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_JS_KEY}&libraries=services&autoload=false`;
+        s.onload = () => kakao.maps.load(() => resolve(kakao.maps.services));
+        s.onerror = () => reject(new Error('카카오 SDK를 불러오지 못했어요. 앱 키와 등록 도메인을 확인하세요.'));
+        document.head.appendChild(s);
+      }).catch(e => { kakaoReady = null; throw e; });
+    }
+    return kakaoReady;
+  }
+
+  // 주소로 먼저 찾고, 없으면 장소명(키워드)으로 찾음 → [{title, sub, x, y}]
+  async function geocode(q) {
+    const svc = await kakaoServices();
+    const OK = svc.Status.OK;
+    const addrs = await new Promise(r => new svc.Geocoder().addressSearch(q, (res, st) => r(st === OK ? res : []), { size: 5 }));
+    if (addrs.length) {
+      return addrs.map(a => ({
+        title: (a.road_address && a.road_address.address_name) || a.address_name,
+        sub: a.road_address && a.address ? a.address.address_name : '',
+        x: Number(a.x), y: Number(a.y),
+      }));
+    }
+    const places = await new Promise(r => new svc.Places().keywordSearch(q, (res, st) => r(st === OK ? res : []), { size: 5 }));
+    return places.map(p => ({ title: p.place_name, sub: p.road_address_name || p.address_name, x: Number(p.x), y: Number(p.y) }));
+  }
+
+  // 좌표 → 주소 (지도 클릭용). 실패하면 null
+  async function reverseGeocode(x, y) {
+    try {
+      const svc = await kakaoServices();
+      return await new Promise(r => new svc.Geocoder().coord2Address(x, y, (res, st) => {
+        if (st !== svc.Status.OK || !res.length) return r(null);
+        const a = res[0];
+        r({ title: (a.road_address && a.road_address.address_name) || a.address.address_name, sub: a.road_address ? a.address.address_name : '' });
+      }));
+    } catch (e) { return null; }
+  }
+
+  /* ---------- 기하 계산 ---------- */
+  function inRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function inZone(x, y, z) {
+    const [a, b, c, d] = z.b;
+    if (x < a || x > c || y < b || y > d) return false;
+    return z.g.some(poly => inRing(x, y, poly[0]) && !poly.slice(1).some(h => inRing(x, y, h)));
+  }
+  // 점 → zone 경계까지 최단거리(m), 국지 평면 근사
+  function distToZone(x, y, z) {
+    const kx = 111320 * Math.cos(y * Math.PI / 180), ky = 110540;
+    let best = Infinity;
+    for (const poly of z.g) for (const ring of poly) for (let i = 1; i < ring.length; i++) {
+      const ax = (ring[i - 1][0] - x) * kx, ay = (ring[i - 1][1] - y) * ky;
+      const bx = (ring[i][0] - x) * kx, by = (ring[i][1] - y) * ky;
+      const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;
+      const t = len ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len)) : 0;
+      const px = ax + t * dx, py = ay + t * dy;
+      const d = px * px + py * py;
+      if (d < best) best = d;
+    }
+    return Math.sqrt(best);
+  }
+  // 패널에 가려지지 않는 영역에 맞춰 이동
+  function fitView(bounds) {
+    const panel = document.querySelector('.panel');
+    const mobile = window.innerWidth <= 640;
+    map.fitBounds(bounds, {
+      maxZoom: 16,
+      paddingTopLeft: mobile ? [20, panel.offsetHeight + 30] : [panel.offsetLeft + panel.offsetWidth + 40, 60],
+      paddingBottomRight: [40, 40],
+    });
+  }
+  const fmtDist = m => m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(1)}km`;
+
+  /* ---------- 500m 반경 링 ---------- */
+  // 점에서 zone 꼭짓점까지 가장 먼 거리(m)
+  function farthest(x, y, zones) {
+    const kx = 111320 * Math.cos(y * Math.PI / 180), ky = 110540;
+    let best = 0;
+    zones.forEach(z => z.g.forEach(poly => poly[0].forEach(([px, py]) => {
+      const d = Math.hypot((px - x) * kx, (py - y) * ky);
+      if (d > best) best = d;
+    })));
+    return best;
+  }
+
+  // clipZones가 있으면 링을 그 zone 안쪽으로 잘라서, 없으면 원 그대로 그림
+  function drawRings() {
+    ringLayer.clearLayers();
+    const c = state.current;
+    if (!c || !$('showRings').checked || typeof turf === 'undefined') return;
+    const { x, y, clipZones, maxR, dir, searchR } = c;
+    if (searchR) {
+      L.circle([y, x], { radius: searchR, renderer: ringRenderer, interactive: false, color: RING_COLOR, weight: 2, opacity: .9, fill: false }).addTo(ringLayer);
+    }
+    const kx = 111320 * Math.cos(y * Math.PI / 180), ky = 110540;
+    const at = (r, deg) => { const a = deg * Math.PI / 180; return [x + r * Math.sin(a) / kx, y + r * Math.cos(a) / ky]; };
+    const n = Math.max(1, Math.min(Math.ceil(maxR / RING_STEP), RING_MAX / RING_STEP));
+
+    let clip = null;
+    if (clipZones.length) {
+      const feats = clipZones.map(z => turf.multiPolygon(z.g));
+      clip = feats.length > 1 ? (turf.union(turf.featureCollection(feats)) || feats[0]) : feats[0];
+    }
+    const circle = r => turf.circle([x, y], r / 1000, { steps: 96, units: 'kilometers' }).geometry.coordinates[0];
+
+    for (let i = 0; i < n; i++) {
+      const r0 = i * RING_STEP, r1 = (i + 1) * RING_STEP;
+      let band = i === 0 ? turf.polygon([circle(r1)]) : turf.polygon([circle(r1), circle(r0).slice().reverse()]);
+      if (clip) band = turf.intersect(turf.featureCollection([band, clip]));
+      if (!band) continue;
+      const t = n === 1 ? 1 : i / (n - 1);                 // 안쪽은 옅게, 바깥쪽은 진하게
+      const coords = band.geometry.type === 'Polygon' ? [band.geometry.coordinates] : band.geometry.coordinates;
+      const style = clip
+        ? { stroke: true, color: '#ffffff', weight: 1, opacity: .9, fillColor: RING_COLOR, fillOpacity: .10 + .38 * t }
+        : { stroke: true, color: RING_COLOR, weight: 1.5, opacity: .75, dashArray: '4 5', fill: false }; // zone 밖이면 선만
+      L.polygon(coords.map(p => p.map(ring => ring.map(([lx, ly]) => [ly, lx]))), {
+        renderer: ringRenderer, interactive: false, ...style,
+      }).addTo(ringLayer);
+
+      // 거리 라벨: zone 안이면 zone 안쪽에 들어오는 방향, zone 밖이면 가장 가까운 zone 방향
+      const deg = clip
+        ? [0, 180, 45, 315, 135, 225, 90, 270].find(d => { const [px, py] = at(r1, d); return clipZones.some(z => inZone(px, py, z)); })
+        : dir;
+      if (deg !== undefined) {
+        const [px, py] = at(r1, deg);
+        L.tooltip({ permanent: true, direction: 'center', className: r1 % 1000 ? 'rlabel rhalf' : 'rlabel', interactive: false })
+          .setLatLng([py, px])
+          .setContent(r1 >= 1000 ? `${(r1 / 1000).toString()}km` : `${r1}m`)
+          .addTo(ringLayer);
+      }
+    }
+  }
+
+  // 후보 방향 중 zone 이름표 방향들과 가장 멀리 떨어진 방향 (가로 방향은 라벨끼리 겹치기 쉬워 후순위)
+  function freeDirection(bearings) {
+    const diff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+    const cands = [0, 180, 30, 330, 150, 210, 60, 300, 120, 240];
+    let best = 0, bestScore = -1;
+    cands.forEach(d => {
+      const score = bearings.length ? Math.min(...bearings.map(b => diff(d, b))) : 180;
+      if (score > bestScore + 10) { best = d; bestScore = score; }
+    });
+    return best;
+  }
+
+  /* ---------- 화면 ---------- */
+  function drawAllZones() {
+    allLayer.clearLayers();
+    if (!$('showAll').checked) return;
+    state.zones.forEach(z => {
+      L.polygon(toLatLngs(z.g), { color: '#5b6070', weight: 1, opacity: .55, fillColor: '#5b6070', fillOpacity: .04 })
+        .bindTooltip(`${z.c} · ${z.n}`, { sticky: true, className: 'hover' })
+        .addTo(allLayer);
+    });
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  function zoneButton(z, color, extra) {
+    return `<button class="zone" data-key="${esc(z.c + '|' + z.n)}">
+      <span class="sw" style="background:${color}"></span>
+      <span><div class="zname">${esc(z.n)}</div><div class="zcity">${esc(z.c)}</div></span>
+      ${extra ? `<span class="zdist">${extra}</span>` : ''}
+    </button>`;
+  }
+
+  function clearResult() {
+    hitLayer.clearLayers();
+    ringLayer.clearLayers();
+    state.current = null;
+  }
+
+  async function search(raw) {
+    const q = String(raw).trim();
+    const out = $('out');
+    if (!q) { out.innerHTML = `<div class="msg err">주소나 장소명을 입력하세요.</div>`; return; }
+    $('q').value = q;
+    out.innerHTML = `<div class="msg">찾는 중…</div>`;
+    clearResult();
+
+    let list;
+    try { list = await geocode(q); }
+    catch (e) { out.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+    if (!list.length) {
+      out.innerHTML = `<div class="msg err">‘${esc(q)}’ 검색 결과가 없어요. 도로명·지번 주소나 장소명으로 다시 입력해 보세요.</div>`;
+      return;
+    }
+    remember(q);
+    history.replaceState(null, '', `?q=${encodeURIComponent(q)}`);
+    showPoint(list[0], list);
+  }
+
+  // place: {title, sub, x, y}, alts: 같은 검색의 다른 후보들
+  function showPoint(place, alts = []) {
+    clearResult();
+    const out = $('out');
+    const { title: name, sub, x, y } = place;
+    const hits = state.zones.filter(z => inZone(x, y, z));
+    let html = `<div class="card">
+      <div class="vname" id="ptitle">${esc(name)}</div>
+      <div class="vmeta"><span id="psub">${sub ? esc(sub) + ' · ' : ''}</span>${y.toFixed(6)}, ${x.toFixed(6)}</div>
+      <div class="actions">
+        <a href="https://map.kakao.com/link/map/${encodeURIComponent(name)},${y},${x}" target="_blank" rel="noopener">카카오맵</a>
+        <a href="https://map.naver.com/p?c=${x},${y},17,0,0,0,dh" target="_blank" rel="noopener">네이버지도</a>
+        <button type="button" id="copyC">좌표 복사</button>
+        <button type="button" id="copyL">링크 복사</button>
+      </div>`;
+    if (alts.length > 1) {
+      html += `<div class="label">다른 검색 결과</div><div class="alts">` +
+        alts.map((a, i) => a === place ? '' : `<button type="button" data-i="${i}">${esc(a.title)}${a.sub ? `<small>${esc(a.sub)}</small>` : ''}</button>`).join('') +
+        `</div>`;
+    }
+
+    const bounds = L.latLngBounds([[y, x]]);
+    const zoneByKey = {};
+    let nearInfo = null;
+
+    if (hits.length) {
+      html += `<div class="label">소속 zone ${hits.length > 1 ? `(${hits.length}개 겹침)` : ''}</div>`;
+      hits.forEach((z, i) => {
+        const color = ZONE_COLORS[i % ZONE_COLORS.length];
+        const layer = L.polygon(toLatLngs(z.g), { color, weight: 3, fillColor: color, fillOpacity: $('showRings').checked ? .04 : .14 }).addTo(hitLayer);
+        layer.bindTooltip(z.n, { permanent: true, direction: 'center', className: 'zlabel' });
+        bounds.extend(layer.getBounds());
+        zoneByKey[z.c + '|' + z.n] = layer;
+        html += zoneButton(z, color);
+      });
+    } else {
+      // 반경 4km 이내 zone 전부, 없으면 가장 가까운 zone 1개
+      const all = state.zones.map(z => ({ z, d: distToZone(x, y, z) })).sort((a, b) => a.d - b.d);
+      const within = all.filter(r => r.d <= NEAR_RADIUS);
+      const list = within.length ? within : all.slice(0, 1);
+      html += `<div class="label">소속 zone</div>` + (within.length
+        ? `<div class="notice">어느 zone에도 속하지 않는 위치예요. 반경 ${NEAR_RADIUS / 1000}km 이내 zone ${within.length}개를 보여드려요.</div>
+           <div class="label">반경 ${NEAR_RADIUS / 1000}km 이내 zone</div>`
+        : `<div class="notice">어느 zone에도 속하지 않고, 반경 ${NEAR_RADIUS / 1000}km 이내에도 zone이 없어요. 가장 가까운 zone을 보여드려요.</div>
+           <div class="label">가장 가까운 zone</div>`);
+      list.forEach((r, i) => {
+        const color = within.length ? NEAR_COLORS[i % NEAR_COLORS.length] : NEAR_COLOR;
+        const layer = L.polygon(toLatLngs(r.z.g), {
+          color, weight: 2.5, dashArray: '6 6', fillColor: color, fillOpacity: .08,
+        }).addTo(hitLayer);
+        layer.bindTooltip(`${r.z.n} · ${fmtDist(r.d)}`, { permanent: true, direction: 'center', className: 'zlabel' });
+        if (!within.length) bounds.extend(layer.getBounds());
+        zoneByKey[r.z.c + '|' + r.z.n] = layer;
+        html += zoneButton(r.z, color, fmtDist(r.d));
+      });
+      // 4km 이내가 있으면 화면을 반경 4km 원에 맞춤
+      if (within.length) bounds.extend(L.latLng(y, x).toBounds(NEAR_RADIUS * 2));
+      // 지도에 표시된 zone 이름표 방향(도) — 거리 라벨을 이 방향들과 최대한 떨어뜨리기 위함
+      const bearings = Object.values(zoneByKey).map(l => {
+        const c = l.getCenter();
+        return Math.atan2((c.lng - x) * Math.cos(y * Math.PI / 180), c.lat - y) * 180 / Math.PI;
+      });
+      nearInfo = { nearest: all[0], hasWithin: within.length > 0, bearings };
+    }
+    html += `</div>`;
+    out.innerHTML = html;
+
+    // 소속 zone이 있으면 그 안에서 zone 끝까지 칠한 링,
+    // 없으면 점선 링: 4km 이내 zone이 있으면 4km까지(경계 실선 표시), 없으면 가장 가까운 zone 경계까지(1~5km)
+    state.current = hits.length
+      ? { x, y, clipZones: hits, maxR: farthest(x, y, hits) }
+      : (() => {
+          const near = nearInfo.nearest;
+          const [cx, cy] = [(near.z.b[0] + near.z.b[2]) / 2, (near.z.b[1] + near.z.b[3]) / 2];
+          const dir = Math.atan2((cx - x) * Math.cos(y * Math.PI / 180), cy - y) * 180 / Math.PI;
+          return nearInfo.hasWithin
+            ? { x, y, clipZones: [], dir: freeDirection(nearInfo.bearings), maxR: NEAR_RADIUS, searchR: NEAR_RADIUS }
+            : { x, y, clipZones: [], dir, maxR: Math.max(1000, Math.min(5000, near.d)) };
+        })();
+    drawRings();
+
+    const pin = L.marker([y, x], {
+      icon: L.divIcon({ className: '', html: '<div class="vpin"></div>', iconSize: [22, 22], iconAnchor: [11, 26] }),
+      zIndexOffset: 1000,
+    }).bindTooltip(esc(name), { direction: 'top', offset: [0, -24] }).addTo(hitLayer);
+
+    fitView(bounds);
+
+    out.querySelectorAll('.zone').forEach(btn => btn.addEventListener('click', () => {
+      const layer = zoneByKey[btn.dataset.key];
+      if (layer) fitView(L.latLngBounds(layer.getBounds()).extend(pin.getLatLng()));
+    }));
+    const copy = (text, btn) => navigator.clipboard.writeText(text).then(() => {
+      const t = btn.textContent; btn.textContent = '복사됨'; setTimeout(() => btn.textContent = t, 1200);
+    });
+    $('copyC').onclick = e => copy(`${y}, ${x}`, e.currentTarget);
+    $('copyL').onclick = e => copy(location.href, e.currentTarget);
+    out.querySelectorAll('.alts button').forEach(b => b.onclick = () => showPoint(alts[Number(b.dataset.i)], alts));
+  }
+
+  // 지도 클릭 → 그 위치로 확인 (주소는 뒤이어 채움)
+  map.on('click', async e => {
+    if (!state.zones.length) return;
+    const x = Number(e.latlng.lng.toFixed(6)), y = Number(e.latlng.lat.toFixed(6));
+    showPoint({ title: '지도에서 선택한 위치', sub: '', x, y });
+    history.replaceState(null, '', `?ll=${y},${x}`);
+    const r = await reverseGeocode(x, y);
+    if (r && state.current && state.current.x === x && state.current.y === y && $('ptitle')) {
+      $('ptitle').textContent = r.title;
+      $('psub').textContent = r.sub ? r.sub + ' · ' : '';
+    }
+  });
+
+  /* ---------- 최근 검색 (이 브라우저에만 저장) ---------- */
+  const RKEY = 'addrZoneRecent';
+  function readRecent() { try { return JSON.parse(localStorage.getItem(RKEY)) || []; } catch (e) { return []; } }
+  function remember(q) {
+    const list = [q, ...readRecent().filter(x => x !== q)].slice(0, 6);
+    try { localStorage.setItem(RKEY, JSON.stringify(list)); } catch (e) {}
+    renderRecent(list);
+  }
+  function renderRecent(list = readRecent()) {
+    $('recent').innerHTML = list.map(id => `<button type="button" data-id="${esc(id)}">${esc(id)}</button>`).join('');
+    $('recent').querySelectorAll('button').forEach(b => b.onclick = () => search(b.dataset.id));
+  }
+
+  /* ---------- 시작 ---------- */
+  $('f').addEventListener('submit', e => { e.preventDefault(); search($('q').value); });
+  $('showAll').addEventListener('change', drawAllZones);
+  // 링 간격이 화면상 좁으면 0.5km 단위 라벨 숨김
+  function updateRingLabels() {
+    const c = map.getCenter();
+    const px = map.latLngToContainerPoint(c).distanceTo(map.latLngToContainerPoint([c.lat + RING_STEP / 110540, c.lng]));
+    $('map').classList.toggle('ring-sparse', px < 28);
+  }
+  map.on('zoomend', updateRingLabels);
+  updateRingLabels();
+  $('showRings').addEventListener('change', () => {
+    drawRings();
+    const op = $('showRings').checked ? .04 : .14;
+    hitLayer.eachLayer(l => { if (l instanceof L.Polygon && !l.options.dashArray) l.setStyle({ fillOpacity: op }); });
+  });
+
+  (async () => {
+    try {
+      state.meta = await loadJson('meta.json');
+      state.zones = (await loadJson('zones.json', state.meta.updated_at)).zones;
+      const t = state.meta.updated_at.replace('T', ' ').slice(0, 16);
+      $('asof').textContent = `${t} 기준 · zone ${state.meta.zone_count}`;
+      drawAllZones();
+      renderRecent();
+      $('go').disabled = false;
+      const params = new URLSearchParams(location.search);
+      const ll = (params.get('ll') || '').split(',').map(Number);
+      if (params.get('q')) search(params.get('q'));
+      else if (ll.length === 2 && ll.every(isFinite)) {
+        showPoint({ title: '지도에서 선택한 위치', sub: '', x: ll[1], y: ll[0] });
+        reverseGeocode(ll[1], ll[0]).then(r => { if (r && $('ptitle')) { $('ptitle').textContent = r.title; $('psub').textContent = r.sub ? r.sub + ' · ' : ''; } });
+      } else $('q').focus();
+    } catch (e) {
+      $('asof').textContent = '데이터를 불러오지 못했어요';
+      $('out').innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+    }
+  })();
+})();
+</script>
+</body>
+</html>
